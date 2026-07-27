@@ -1,6 +1,6 @@
 # Config mínima da Supabase CLI. Rode `supabase link --project-ref <ref>` para vincular
 # ao projeto (o ref está na URL do painel / no SUPABASE_URL). Não guarda segredos.
-project_id = "your-project-ref"
+project_id = "xiyejudckfxfexnrhgqp"
 
 [functions.ai-proxy]
 verify_jwt = false   # a própria função valida o token Supabase do usuário (ver functions/ai-proxy/index.ts)
