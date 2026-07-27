@@ -1,0 +1,40 @@
+name: Sync (Customer.io + Pipedrive -> Supabase)
+
+# Roda o sync automaticamente (auditoria: hoje é manual e o dado envelhece sem aviso).
+on:
+  schedule:
+    - cron: '0 6 * * *'      # todo dia 06:00 UTC (03:00 BRT)
+  workflow_dispatch: {}       # permite rodar manualmente pelo botão "Run workflow"
+
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # O sync usa só a stdlib — não há dependências para instalar.
+      - name: Rodar sync
+        env:
+          # Configure estes SECRETS em: Settings > Secrets and variables > Actions.
+          CUSTOMERIO_APP_API_KEY: ${{ secrets.CUSTOMERIO_APP_API_KEY }}
+          CUSTOMERIO_WORKSPACE_ID: ${{ secrets.CUSTOMERIO_WORKSPACE_ID }}
+          CUSTOMERIO_REGION: ${{ secrets.CUSTOMERIO_REGION }}
+          PIPEDRIVE_API_TOKEN: ${{ secrets.PIPEDRIVE_API_TOKEN }}
+          PIPEDRIVE_API_BASE: ${{ secrets.PIPEDRIVE_API_BASE }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          DASHBOARD_CUTOFF: '2026-01-01'
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: python sync/sync.py
+
+      # data/ contém PII e está no .gitignore — NÃO fazer upload/commit de artefatos.

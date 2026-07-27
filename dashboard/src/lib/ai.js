@@ -1,0 +1,111 @@
+// Camada de IA: monta o contexto (dados + metodologia) e chama a API do Claude.
+import {
+  scopeClients, scopeLeads, computeKpis, byPrograma, eficienciaCohort,
+  leadsByReferrer, saudePrograma, qualidade, mrrSection, tierMix, activeClients,
+} from './metrics'
+import { methodologyText } from './faq'
+
+const today = () => new Date().toISOString().slice(0, 10)
+const r = (n) => Math.round(n || 0)
+
+export function buildContext(raw) {
+  const A = raw.ambassadors, R = raw.referrers, clients = raw.clients, leads = raw.leads || []
+  const all = { programa: 'todos', registered: 'todos', tier: 'todos' }
+  const emb = { ...all, programa: 'embaixador' }
+  const period = { from: '2026-01-01', to: today() }
+  const asOf = new Date()
+  const sc = scopeClients(clients, all), sl = scopeLeads(leads, all)
+  const sce = scopeClients(clients, emb), sle = scopeLeads(leads, emb)
+  const kpi = computeKpis(sce, sle, A, period)
+  const mrr = mrrSection(sce, period)
+  const prog = byPrograma(sc, sl, period)
+  const sau = saudePrograma(A, R)
+  const qual = qualidade(sce, period)
+  const ef = eficienciaCohort(sce, A, R, leadsByReferrer(sle, period), period, asOf)
+  const tiers = tierMix(activeClients(sce, period))
+
+  const progLines = prog.map((p) => `- ${p.programa}: ${p.referenciadores} referenciadores, ${p.leads} leads, ${p.ganhos} ganhos, conversão ${pctt(p.taxaConversao)}, ${p.clientesAtivos} clientes ativos, MRR R$${r(p.mrrAtivo)}`).join('\n')
+  const efLines = ef.slice(0, 40).map((x) => `- ${x.name || x.key} (${x.registered ? 'cadastrado' : 'não cad'}): ${x.leads} leads, ${x.newCustomers} novos no período, conversão ${pctt(x.taxaConversao)}, CAC ${x.cac != null ? 'R$' + r(x.cac) : '—'}, LTV/CAC ${x.ltvCac != null ? x.ltvCac.toFixed(1) : '—'}, payback ${x.payback != null ? x.payback.toFixed(1) + 'm' : '—'}, MRR ativo R$${r(x.mrrAtivo)}, investimento total R$${r(x.investimentoTotal)}, net R$${r(x.net)}`).join('\n')
+  const topRefs = R.filter((x) => x.n_clients > 0).sort((a, b) => b.mrr_active - a.mrr_active).slice(0, 50)
+    .map((x) => `- ${x.name || x.referrer_key} | ${x.programa} | ${x.registered ? 'cadastrado' : 'não cad'} | ${x.n_clients} clientes (${x.n_active} ativos) | MRR R$${r(x.mrr_active)}`).join('\n')
+
+  return `${methodologyText()}
+
+# DADOS ATUAIS (período de referência: 2026 até hoje, salvo indicado)
+
+## Programa de embaixador (2026)
+Leads: ${kpi.leads} | New Customers (ganhos): ${kpi.ganhos} | Taxa de conversão: ${pctt(kpi.taxaConversao)} | Custo (fixo+comissão): R$${r(kpi.custo)} | Cancelados: ${kpi.cancelados}
+Clientes ativos: ${kpi.clientesAtivos} | MRR ativo: R$${r(mrr.mrrAtivo)} | New MRR: R$${r(kpi.newMrr)} | MRR Lost: R$${r(mrr.mrrLost)} | Net Gain MRR: R$${r(mrr.netGain)} | MRR Growth: ${pctt(mrr.mrrGrowth)} | ARPA: R$${r(kpi.arpa)}
+Churn no período: ${pctt(qual.churnRate)} | Lifetime médio: ${qual.lifetime != null ? qual.lifetime.toFixed(1) + ' meses' : '—'}
+Mix de tier (clientes ativos): Tier1 ${tiers[1]}, Tier2 ${tiers[2]}, Tier3 ${tiers[3]}, Tier4 ${tiers[4]}
+
+## Saúde do programa
+São dois universos distintos (não somar entre eles sem cuidado): (A) CADASTRADOS no Pipedrive e (B) quem de fato INDICOU ≥1 lead embaixador.
+Cadastrados: ${sau.cadastradosTotal} (${sau.embaixadoresAtivos} no estágio Ativados; ${sau.cadastradosQueIndicaram} já indicaram algum lead; ${sau.cadastradosComCliente} trouxeram cliente pagante).
+Quem indicou (universo B): ${sau.totalQueIndicaram} = ${sau.cadastradosQueIndicaram} cadastrados + ${sau.indicadoresSemCadastro} sem cadastro. Destes, ${sau.indicadoresComCliente} geraram cliente.
+Total de pessoas no programa (cadastrados ∪ sem cadastro que indicaram): ${sau.totalPessoas} = ${sau.cadastradosTotal} + ${sau.indicadoresSemCadastro}.
+Taxas: indicação dos cadastrados ${pctt(sau.taxaIndicacaoCadastrados)} (${sau.cadastradosQueIndicaram}/${sau.cadastradosTotal}) | conversão dos cadastrados ${pctt(sau.taxaConversaoCadastrados)} (${sau.cadastradosComCliente}/${sau.cadastradosTotal}) | conversão dos indicadores ${pctt(sau.taxaConversaoIndicadores)} (${sau.indicadoresComCliente}/${sau.totalQueIndicaram}).
+
+## Por programa (2026)
+${progLines}
+
+## Eficiência por embaixador (cohort 2026, top 40 por novos clientes)
+${efLines}
+
+## Top referenciadores por MRR ativo (todos os programas)
+${topRefs}
+`
+}
+
+function pctt(n) { return n == null ? '—' : (n * 100).toFixed(1) + '%' }
+
+const SYSTEM = `Você é o assistente do dashboard de Embaixadores da Umbler Talk. Responda SEMPRE em português do Brasil, de forma clara e direta, pensando em pessoas NÃO técnicas. Use exclusivamente a metodologia e os DADOS ATUAIS fornecidos abaixo. Regras:
+- Se a resposta não estiver nos dados, diga que essa informação não está no dashboard — NUNCA invente números.
+- Ao citar um número, diga de onde ele vem (qual métrica/seção).
+- Lembre, quando relevante, que os números por embaixador são um PISO (a atribuição subconta).
+- Seja conciso; use listas quando ajudar. Não invente embaixadores ou clientes que não estão nos dados.`
+
+export async function ask(messages, context) {
+  const proxy = import.meta.env.VITE_AI_PROXY_URL   // produção: proxy server-side (chave fica no servidor)
+  const key = import.meta.env.VITE_ANTHROPIC_API_KEY // dev/local: chamada direta do browser
+  const payload = { model: 'claude-sonnet-4-6', max_tokens: 1024, system: SYSTEM + '\n\n' + context, messages }
+
+  // Preferir o proxy (seguro). Chamada direta só como fallback de dev, com a chave local.
+  let res
+  if (proxy) {
+    res = await fetch(proxy, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${supabaseToken()}` },
+      body: JSON.stringify(payload),
+    })
+  } else if (key) {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    })
+  } else {
+    throw new Error('IA não configurada — defina VITE_AI_PROXY_URL (produção) ou VITE_ANTHROPIC_API_KEY (dev) no .env.local.')
+  }
+  if (!res.ok) throw new Error(`Erro ${res.status}: ${(await res.text()).slice(0, 240)}`)
+  const data = await res.json()
+  return (data.content || []).map((b) => b.text || '').join('')
+}
+
+// Token da sessão Supabase (para o proxy autenticar o usuário). Import tardio p/ evitar ciclo.
+function supabaseToken() {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+        return JSON.parse(localStorage.getItem(k))?.access_token || ''
+      }
+    }
+  } catch { /* sem sessão */ }
+  return ''
+}
