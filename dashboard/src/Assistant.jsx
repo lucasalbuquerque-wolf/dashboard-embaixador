@@ -1,12 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { ask } from './lib/ai'
-
-const SUGGESTIONS = [
-  'Qual embaixador tem o melhor LTV/CAC?',
-  'Qual programa converte mais?',
-  'O que é CAC Payback?',
-  'Quem traz mais cliente sem ser cadastrado?',
-]
 
 export default function Assistant({ context }) {
   const [msgs, setMsgs] = useState([])
@@ -31,18 +26,21 @@ export default function Assistant({ context }) {
   return (
     <div className="assistant">
       <form className="ask-bar" onSubmit={(e) => { e.preventDefault(); send() }}>
-        <span className="ask-ic">✦</span>
+        <i className="ph ph-sparkle ask-ic" />
         <input value={input} onChange={(e) => setInput(e.target.value)} autoComplete="off"
           placeholder="Pergunte ao assistente sobre os dados, programas ou definições…" />
         {open && <button type="button" className="ask-clear" onClick={() => { setMsgs([]); setErr('') }} title="limpar">×</button>}
         <button disabled={busy}>{busy ? '…' : 'Perguntar'}</button>
       </form>
-      {!open && (
-        <div className="chips">{SUGGESTIONS.map((s) => <button key={s} type="button" className="chip" onClick={() => send(s)}>{s}</button>)}</div>
-      )}
       {open && (
         <div className="chat">
-          {msgs.map((m, i) => <div key={i} className={'msg ' + m.role}>{m.content}</div>)}
+          {msgs.map((m, i) => (
+            <div key={i} className={'msg ' + m.role}>
+              {m.role === 'assistant'
+                ? <div className="md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
+                : m.content}
+            </div>
+          ))}
           {busy && <div className="msg assistant muted">pensando…</div>}
           {err && <div className="msg erro">⚠ {err}</div>}
           <div ref={endRef} />

@@ -24,14 +24,14 @@ jobs:
       # O sync usa só a stdlib — não há dependências para instalar.
       - name: Rodar sync
         env:
-          # Configure estes SECRETS em: Settings > Secrets and variables > Actions.
+          # SÓ ESTES 4 são secrets (Settings > Secrets and variables > Actions):
           CUSTOMERIO_APP_API_KEY: ${{ secrets.CUSTOMERIO_APP_API_KEY }}
-          CUSTOMERIO_WORKSPACE_ID: ${{ secrets.CUSTOMERIO_WORKSPACE_ID }}
-          CUSTOMERIO_REGION: ${{ secrets.CUSTOMERIO_REGION }}
           PIPEDRIVE_API_TOKEN: ${{ secrets.PIPEDRIVE_API_TOKEN }}
-          PIPEDRIVE_API_BASE: ${{ secrets.PIPEDRIVE_API_BASE }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          # Bases não são segredo (o config.py lê exatamente estes nomes):
+          CUSTOMERIO_APP_API_BASE: https://api.customer.io
+          PIPEDRIVE_API_BASE: https://umbler.pipedrive.com/api/v1
           DASHBOARD_CUTOFF: '2026-01-01'
           PYTHONUTF8: '1'
           PYTHONIOENCODING: 'utf-8'

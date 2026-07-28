@@ -78,8 +78,23 @@ function monthlyCost(clients, ambassadors, M) {
   const fixo = ambFixos(ambassadors).filter((a) => a.start && a.start <= M).reduce((s, a) => s + a.fixo, 0)
   return commission + fixo
 }
+function daysInMonth(M) {
+  const [y, mo] = M.split('-').map(Number)
+  return [31, (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1]
+}
+// Fração do mês M coberta por [range.from, range.to] (0..1). Mês cheio → 1; recorte parcial → proporcional aos dias.
+function monthFraction(M, range) {
+  const first = M + '-01', last = M + '-' + String(daysInMonth(M)).padStart(2, '0')
+  const lo = range.from > first ? range.from : first
+  const hi = range.to < last ? range.to : last
+  if (hi < lo) return 0
+  return (Number(hi.slice(8, 10)) - Number(lo.slice(8, 10)) + 1) / daysInMonth(M)
+}
+// Custo do período com PRORATA por dias (decisão do Lucas): fixo e comissão do mês são
+// contados na proporção dos dias cobertos — um recorte de 1 dia não conta o mês inteiro.
 function periodCost(clients, ambassadors, range) {
-  return monthRange(range.from.slice(0, 7), range.to.slice(0, 7)).reduce((s, M) => s + monthlyCost(clients, ambassadors, M), 0)
+  return monthRange(range.from.slice(0, 7), range.to.slice(0, 7))
+    .reduce((s, M) => s + monthlyCost(clients, ambassadors, M) * monthFraction(M, range), 0)
 }
 
 // ---- KPIs do período (cards do topo) ------------------------------------
@@ -122,6 +137,31 @@ export function retentionCurve(clients, asOf, offsets = [0, 1, 2, 3, 6, 9, 12]) 
     }
     return { offset: k, pct: elig ? ret / elig : null, n: elig }
   })
+}
+
+// Taxa de desconto mensal do LTV (valor do dinheiro no tempo, ~12,7%/ano). Ajuste único aqui.
+export const LTV_DISCOUNT_MONTHLY = 0.01
+// Vida média pela CURVA de retenção (Kaplan-Meier), COM desconto e COM extrapolação de cauda.
+// Método correto p/ LTV/CAC: integra a área observada e extrapola o rabo pelo hazard tardio
+// (os sobreviventes do cliff do mês 4 têm churn baixo e vivem muito). Sem a cauda, subestima.
+export function curveLifetime(clients, asOf, disc = LTV_DISCOUNT_MONTHLY, tail = true) {
+  const rc = retentionCurve(clients, asOf, [0, 1, 2, 3, 4, 5, 6, 9, 12]).filter((p) => p.pct != null)
+  if (rc.length < 2) return null
+  let life = 0
+  for (let i = 1; i < rc.length; i++) {
+    const dx = rc[i].offset - rc[i - 1].offset
+    const surv = (rc[i].pct + rc[i - 1].pct) / 2               // sobrevivência média no intervalo
+    const mid = (rc[i].offset + rc[i - 1].offset) / 2
+    life += dx * surv / Math.pow(1 + disc, mid)                // descontada pelo mês central
+  }
+  if (!tail) return life                                       // só a área observada (piso, ~mediana)
+  // cauda: extrapola do último ponto com o hazard tardio observado (exponencial)
+  const last = rc[rc.length - 1], prev = rc[rc.length - 2]
+  const dxL = last.offset - prev.offset
+  const tailH = prev.pct > 0 ? Math.min(0.5, Math.max(0.005, 1 - Math.pow(last.pct / prev.pct, 1 / dxL))) : 0.1
+  let S = last.pct, m = last.offset
+  while (S > 0.02 && m < 60) { S *= (1 - tailH); m++; life += S / Math.pow(1 + disc, m) }
+  return life
 }
 
 // Heatmap de retenção POR SAFRA (cohort de aquisição). Linhas = mês em que viraram cliente;
@@ -202,7 +242,13 @@ export function qualidade(clients, range) {
   const activeStart = clients.filter((c) => { const s = day(wonDate(c)); if (!s || s >= range.from) return false; return !c.cancelation_date || day(c.cancelation_date) >= range.from })
   // FIX (auditoria A1): numerador ⊆ denominador — só quem estava ativo no início E cancelou no período.
   const churned = activeStart.filter((c) => inRange(c.cancelation_date, range))
-  return { churnRate: activeStart.length ? churned.length / activeStart.length : null, churned: churned.length, churnDen: activeStart.length, lifetime: programLifetime(clients, asOf) }
+  const churnRate = activeStart.length ? churned.length / activeStart.length : null
+  // FIX (revisão métricas): o churn ACUMULADO do período depende do tamanho da janela (mesmo
+  // erro do lifetime) — 7 meses dá ~44%, 1 mês ~10%, e nenhum é comparável a benchmark mensal.
+  // Normaliza para uma taxa MENSAL equivalente (hazard constante) → comparável entre janelas.
+  const nMonths = Math.max(1, monthsBetweenYm(range.from.slice(0, 7), range.to.slice(0, 7)) + 1)
+  const churnMonthly = churnRate != null && churnRate < 1 ? 1 - Math.pow(1 - churnRate, 1 / nMonths) : churnRate
+  return { churnRate, churnMonthly, nMonths, churned: churned.length, churnDen: activeStart.length, lifetime: programLifetime(clients, asOf) }
 }
 
 // ---- Mix de Tier (reutilizável p/ 3 populações) -------------------------
@@ -268,7 +314,10 @@ export function concentracao(clients, range, referrers) {
   const hhi = total ? vals.reduce((s, x) => s + Math.pow(x.mrr / total, 2), 0) : 0
   let acc = 0, n80 = 0
   for (const x of vals) { acc += x.mrr; n80++; if (acc >= 0.8 * total) break }
-  return { total, nRef: vals.length, top1: share(1), top3: share(3), hhi, n80, top: vals.slice(0, 3) }
+  return {
+    total, nRef: vals.length, top1: share(1), top3: share(3), top3mrr: vals.slice(0, 3).reduce((s, x) => s + x.mrr, 0), hhi, n80,
+    top: vals.slice(0, 8).map((x) => ({ key: x.key, name: x.name, mrr: x.mrr, share: total ? x.mrr / total : 0 })),
+  }
 }
 
 // ---- Eficiência por embaixador: COHORT + CAC + CAC Payback --------------
@@ -276,13 +325,14 @@ export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, ra
   const ambById = Object.fromEntries(ambassadors.map((a) => [a.pd_deal_id, a]))
   const asOfDay = asOf.toISOString().slice(0, 10)
   const monthsInRange = Math.max(1, monthsBetweenYm(range.from.slice(0, 7), range.to.slice(0, 7)) + 1)
-  // FIX (auditoria A2): lifetime do programa (1/churn), não por embaixador — sem viés nem null.
-  const lifetime = programLifetime(clients, asOf)
+  // Vida p/ o LTV: CURVA de retenção com desconto (não 1/churn). O churn é front-loaded, então
+  // 1/churn superestima; a curva é o método correto p/ decisão de orçamento (LTV/CAC).
+  const lifetime = curveLifetime(clients, asOf) ?? programLifetime(clients, asOf)
   const byRef = {}
   for (const c of clients) (byRef[c.referrer_key] ||= []).push(c)
   const rows = []
   for (const r of referrers) {
-    if (r.programa !== 'embaixador') continue
+    // Respeita o filtro: só processa referenciadores que têm clientes no escopo atual (byRef).
     const cls = byRef[r.referrer_key] || []
     if (!cls.length) continue
     const registered = !!r.registered

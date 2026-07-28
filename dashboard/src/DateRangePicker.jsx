@@ -21,10 +21,10 @@ function presets() {
     ['Este mês', { from: toISO(new Date(y, m, 1)), to: tISO }],
     ['Mês passado', { from: toISO(new Date(y, m - 1, 1)), to: toISO(new Date(y, m, 0)) }],
     ['Este ano', { from: `${y}-01-01`, to: tISO }],
-    ['Ano passado', { from: `${y - 1}-01-01`, to: `${y - 1}-12-31` }],
     ['Tudo (desde 2026)', { from: '2026-01-01', to: tISO }],
   ]
 }
+const MIN_DATE = new Date(2026, 0, 1)   // dashboard começa em jan/2026; nada de 2025
 function comparePresets(range) {
   const fr = fromISO(range.from), tt = fromISO(range.to)
   const len = Math.round((tt - fr) / 86400000)
@@ -79,7 +79,7 @@ export default function DateRangePicker({ value, onChange }) {
             </div>
             <div className="drp-cal">
               <div className="drp-editing small">Editando: <strong>{editing === 'compare' ? 'comparação' : 'período'}</strong> <span className="muted">— {fmt(active.from)} a {fmt(active.to)}</span></div>
-              <DayPicker mode="range" numberOfMonths={2} locale={ptBR} selected={{ from: fromISO(active.from), to: fromISO(active.to) }} onSelect={onSelect} defaultMonth={fromISO(active.from)} />
+              <DayPicker mode="range" numberOfMonths={2} locale={ptBR} selected={{ from: fromISO(active.from), to: fromISO(active.to) }} onSelect={onSelect} defaultMonth={fromISO(active.from)} disabled={{ before: MIN_DATE }} startMonth={MIN_DATE} hidden={{ before: MIN_DATE }} />
             </div>
           </div>
         </div>
