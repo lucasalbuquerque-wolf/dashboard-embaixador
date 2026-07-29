@@ -39,12 +39,10 @@ Clientes ativos: ${kpi.clientesAtivos} | MRR ativo: R$${r(mrr.mrrAtivo)} | New M
 Churn no período: ${pctt(qual.churnRate)} | Lifetime médio: ${qual.lifetime != null ? qual.lifetime.toFixed(1) + ' meses' : '—'}
 Mix de tier (clientes ativos): Tier1 ${tiers[1]}, Tier2 ${tiers[2]}, Tier3 ${tiers[3]}, Tier4 ${tiers[4]}
 
-## Saúde do programa
-São dois universos distintos (não somar entre eles sem cuidado): (A) CADASTRADOS no Pipedrive e (B) quem de fato INDICOU ≥1 lead embaixador.
-Cadastrados: ${sau.cadastradosTotal} (${sau.embaixadoresAtivos} no estágio Ativados; ${sau.cadastradosQueIndicaram} já indicaram algum lead; ${sau.cadastradosComCliente} trouxeram cliente pagante).
-Quem indicou (universo B): ${sau.totalQueIndicaram} = ${sau.cadastradosQueIndicaram} cadastrados + ${sau.indicadoresSemCadastro} sem cadastro. Destes, ${sau.indicadoresComCliente} geraram cliente.
-Total de pessoas no programa (cadastrados ∪ sem cadastro que indicaram): ${sau.totalPessoas} = ${sau.cadastradosTotal} + ${sau.indicadoresSemCadastro}.
-Taxas: indicação dos cadastrados ${pctt(sau.taxaIndicacaoCadastrados)} (${sau.cadastradosQueIndicaram}/${sau.cadastradosTotal}) | conversão dos cadastrados ${pctt(sau.taxaConversaoCadastrados)} (${sau.cadastradosComCliente}/${sau.cadastradosTotal}) | conversão dos indicadores ${pctt(sau.taxaConversaoIndicadores)} (${sau.indicadoresComCliente}/${sau.totalQueIndicaram}).
+## Saúde do programa (embaixador) — 3 blocos que reconciliam
+Roster formal (Pipedrive funil 45): ${sau.noFunil} no funil = ${sau.ativos} Ativados + ${sau.emProcesso} em processo (demo/negociação/onboarding). Dos ${sau.ativos} ativos, ${sau.comFixo} recebem fixo (cada um com seu valor; permuta/só-comissão não recebem), somando R$${r(sau.fixoTotal)}/mês. Só quem está em "Ativados" com valor de fixo entra no custo.
+Quem realmente indica (referrers programa=embaixador): ${sau.totalQueIndicaram} pessoas = ${sau.cadastradosQueIndicaram} cadastrados no funil + ${sau.semCadastroQueIndicaram} sem cadastro. Dos ${sau.ativos} ativos, ${sau.ativosQueIndicaram} de fato indicaram (${pctt(sau.taxaIndicamAtivos)}) — estar ativo ≠ estar indicando.
+Quem gera cliente pagante: ${sau.queGeraramCliente} dos ${sau.totalQueIndicaram} que indicaram (${pctt(sau.taxaConversaoIndicadores)}); destes ${sau.ativosQueGeraramCliente} são ativos do funil e ${sau.semCadastroQueGeraramCliente} são sem cadastro (ex.: Darlan).
 
 ## Por programa (2026)
 ${progLines}

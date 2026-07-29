@@ -9,7 +9,7 @@ import {
   computeKpis, mrrSection, qualidade, saudePrograma, byPrograma, eficienciaCohort,
   tierMix, activeClients, monthlySeries, cumulativeContribution, mergeByIndex, inRange, wonDate,
   concentracao, GROSS_MARGIN, retentionCurve, mrrMovements, mrrSnapshotMonths,
-  cohortRetentionMatrix, RET_OFFSETS, curveLifetime, programLifetime,
+  cohortRetentionMatrix, RET_OFFSETS, curveLifetime, programLifetime, lifetimeSummary,
 } from './lib/metrics'
 import {
   ResponsiveContainer, ComposedChart, AreaChart, LineChart, Area, Line, Bar,
@@ -124,6 +124,8 @@ export default function Dashboard({ session }) {
     if (cmp) series = mergeByIndex(series, monthlySeries(sc, sl, A, cmp.from.slice(0, 7), cmp.to.slice(0, 7)), [...NORMK, 'mrr', 'lostMrr'])
     series = addNorm(series, NORMK)
     const allC = scopeClients(raw.clients, { ...f, programa: 'todos' }), allL = scopeLeads(raw.leads || [], { ...f, programa: 'todos' })
+    // Eficiência: TODOS os indicadores do programa filtrado (embaixador/parceiro/ambos), mesmo sem cliente ainda.
+    const efRefs = R.filter((r) => f.programa === 'todos' ? (r.programa === 'embaixador' || r.programa === 'parceiro') : r.programa === f.programa)
     // Funil de indicações (sempre programa embaixador — casa com o rótulo dos negócios no Pipedrive)
     const sumPd = (period) => (raw.pdDaily || []).filter((r) => r.period === period && r.snapshot_date >= range.from && r.snapshot_date <= range.to).reduce((s, r) => s + (r.value || 0), 0)
     const funnel = {
@@ -138,10 +140,10 @@ export default function Dashboard({ session }) {
       mrr: mrrSection(sc, range), mrrCmp: cmp ? mrrSection(sc, cmp) : null,
       qual: qualidade(sc, range), sau: saudePrograma(A, R), conc: concentracao(sc, range, R),
       ret: retentionCurve(sc, asOf), retMatrix: cohortRetentionMatrix(sc, asOf),
-      lifeLow: curveLifetime(sc, asOf, undefined, false), lifeHigh: curveLifetime(sc, asOf),
+      life: lifetimeSummary(sc, asOf),
       mrrMov: (() => { const ms = mrrSnapshotMonths(raw.mrrSnap || []); return ms.length >= 2 ? mrrMovements(raw.mrrSnap, ms[ms.length - 2], ms[ms.length - 1]) : null })(),
       snapMonths: mrrSnapshotMonths(raw.mrrSnap || []).length,
-      ef: eficienciaCohort(sc, A, R, leadsByReferrer(sl, range), range, asOf),
+      ef: eficienciaCohort(sc, A, efRefs, leadsByReferrer(sl, range), range, asOf),
       prog: byPrograma(allC, allL, range), payback: cumulativeContribution(sc, A),
       series, compareOn: !!cmp,
       // Mix de Tier respeita programa/cadastro (mas ignora o filtro de Tier — senão vira 100% de um tier só).
@@ -215,7 +217,7 @@ export default function Dashboard({ session }) {
         </ResponsiveContainer>
         {f.programa !== 'parceiro' && <Funnel f={v.funnel} />}
         <div className="stats" style={{ marginTop: 12 }}>
-          <Stat l="Custo por lead" v={v.kpi.custoPorLead != null ? money(v.kpi.custoPorLead) : '—'} sub="Quanto o programa gastou (fixo + comissão) para cada indicação que entrou no período. Serve para comparar o canal de indicação com outros canais de aquisição." delta={v.kpiCmp && <Delta v={v.kpi.custoPorLead} cv={v.kpiCmp.custoPorLead} up={false} />} />
+          <Stat l="Custo por lead" v={v.kpi.custoPorLead != null ? money(v.kpi.custoPorLead) : '—'} sub="Quanto o programa gastou em FIXO para cada indicação que entrou no período. Só o fixo entra aqui — a comissão só existe quando o lead vira cliente (e aí vira custo de cliente, não de lead). Serve para comparar o canal de indicação com outros canais de aquisição." delta={v.kpiCmp && <Delta v={v.kpi.custoPorLead} cv={v.kpiCmp.custoPorLead} up={false} />} />
           <Stat l="Custo por cliente novo" v={v.kpi.custoPorCliente != null ? money(v.kpi.custoPorCliente) : '—'} sub="Quanto o programa gastou para cada cliente novo que fechou no período. É o custo de aquisição por cliente, pelo canal de indicação." delta={v.kpiCmp && <Delta v={v.kpi.custoPorCliente} cv={v.kpiCmp.custoPorCliente} up={false} />} />
         </div>
       </section>
@@ -225,8 +227,8 @@ export default function Dashboard({ session }) {
         <div className="stats">
           <Stat l="MRR ativo" v={money(v.mrr.mrrAtivo)} sub="Receita recorrente mensal da base ativa hoje: a soma do valor de contrato de todos os clientes ativos do programa. É o 'estoque' de receita." delta={v.mrrCmp && <Delta v={v.mrr.mrrAtivo} cv={v.mrrCmp.mrrAtivo} up />} />
           <Stat l="ARPA (ticket médio)" v={money(v.kpi.arpa)} sub="Ticket médio: quanto cada cliente ativo paga por mês, em média. É a receita recorrente (MRR) dividida pelo número de clientes ativos." delta={v.kpiCmp && <Delta v={v.kpi.arpa} cv={v.kpiCmp.arpa} up />} />
-          <Stat l="MRR Lost" v={money(v.mrr.mrrLost)} bad sub="Receita recorrente que saiu no período: a soma do valor de contrato dos clientes que cancelaram." delta={v.mrrCmp && <Delta v={v.mrr.mrrLost} cv={v.mrrCmp.mrrLost} up={false} />} />
-          <Stat l="GRR (retenção de receita)" v={pct(v.mrr.grr)} good={v.mrr.grr >= 0.85} bad={v.mrr.grr != null && v.mrr.grr < 0.85} sub={`De tudo que a base já pagava no início do período, quanto você manteve (sem contar vendas novas). Você perdeu ${pct(v.mrr.grossMrrChurn)} da receita por cancelamento. Saudável acima de 85%.`} />
+          <Stat l="MRR Lost" v={money(v.mrr.mrrLost)} bad sub={`Receita recorrente que saiu no período — soma do contrato de TODOS que cancelaram (fluxo total, mesma base do card "Customer Cancellations"). Destes, ${money(v.mrr.mrrLostBase)} vinham da base que já existia no início; o resto (${money(v.mrr.mrrLost - v.mrr.mrrLostBase)}) são clientes que entraram E saíram dentro do período. O GRR usa só a parte da base.`} delta={v.mrrCmp && <Delta v={v.mrr.mrrLost} cv={v.mrrCmp.mrrLost} up={false} />} />
+          <Stat l="GRR mensal (equiv.)" v={pct(v.mrr.grrMonthly)} good={v.mrr.grrMonthly >= 0.85} bad={v.mrr.grrMonthly != null && v.mrr.grrMonthly < 0.85} sub={`De tudo que a base já pagava, quanto você retém por mês (sem contar vendas novas) — normalizado para taxa MENSAL, comparável com o benchmark (saudável acima de 85-90%). No período inteiro (${v.qual.nMonths} ${v.qual.nMonths === 1 ? 'mês' : 'meses'}) o GRR acumulado foi ${pct(v.mrr.grr)} e a receita da base sangrou ${pct(v.mrr.grossMrrChurn)} — mas esse acumulado depende do tamanho da janela, por isso mostramos o mensal.`} />
           <Stat l="MRR Growth" v={pct(v.mrr.mrrGrowth)} good={v.mrr.mrrGrowth >= 0} bad={v.mrr.mrrGrowth < 0} sub="Crescimento % da receita recorrente no período: quanto o MRR ativo variou do início ao fim (inclui vendas novas e cancelamentos)." />
           <Stat l="Net Gain MRR" v={money(v.mrr.netGain)} good={v.mrr.netGain >= 0} bad={v.mrr.netGain < 0} sub="Ganho líquido de receita no período: receita nova que entrou (New MRR) menos a que saiu por cancelamento (MRR Lost)." delta={v.mrrCmp && <Delta v={v.mrr.netGain} cv={v.mrrCmp.netGain} up />} />
           <Stat l="NRR (retenção líquida)" v={v.mrrMov ? pct(v.mrrMov.nrr) : '—'} good={v.mrrMov && v.mrrMov.nrr >= 1} bad={v.mrrMov && v.mrrMov.nrr < 1}
@@ -281,16 +283,16 @@ export default function Dashboard({ session }) {
       </Section>
 
       {/* Eficiência por embaixador (cohort + CAC) */}
-      <Section id="eficiencia" title={f.programa === 'todos' ? 'Eficiência por indicador' : `Eficiência por ${f.programa}`} sub={`Economia por safra: o período seleciona os clientes adquiridos nele e mede CAC, payback e LTV/CAC dessa turma. Priorize o CAC PAYBACK para decisão — depende dos primeiros meses (observados). O LTV/CAC é referência: usa a vida média (Kaplan-Meier com cauda, ~10m), mas essa média esconde que ~metade dos clientes cancela no cliff do mês 4. O CAC inclui a comissão comprometida dos 3 meses. ${GROSS_MARGIN < 1 ? `Margem bruta de ${Math.round(GROSS_MARGIN * 100)}%.` : 'Sobre a receita cheia.'} Comissão paga a todo embaixador; fixo só aos cadastrados.`}>
+      <Section id="eficiencia" title={f.programa === 'todos' ? 'Eficiência por indicador' : `Eficiência por ${f.programa}`} sub={`Economia por safra: o período seleciona os clientes adquiridos nele e mede CAC, payback e LTV/CAC dessa turma. Priorize o CAC PAYBACK para decisão — depende dos primeiros meses (observados). O LTV/CAC é referência: usa a vida média (Kaplan-Meier com cauda, ~10m), mas essa média esconde que ~metade dos clientes cancela no cliff do mês 4. O CAC inclui a comissão comprometida dos 3 meses. ${GROSS_MARGIN < 1 ? `Margem bruta de ${Math.round(GROSS_MARGIN * 100)}%.` : 'Sobre a receita cheia.'} Comissão paga a todo indicador; fixo só aos embaixadores "Ativados". Mostra TODOS os indicadores do programa, inclusive quem ainda não gerou cliente. Cada linha é identificada pelo e-mail (passe o mouse para ver o nome).`}>
         <div className="tablewrap">
           <table>
             <thead><tr>
-              <th>Embaixador</th><th>Cad.</th><th>% MRR</th><th>Leads</th><th>New Customers</th><th>Conv. lead→cliente</th>
-              <th>CAC</th><th>LTV/CAC</th><th>CAC Payback</th><th>MRR ativo</th><th>Investimento Total</th><th>Receita</th><th>{GROSS_MARGIN < 1 ? 'Contribuição' : 'Net'}</th>
+              <th>E-mail</th><th>Cad.</th><th>% MRR</th><th>Leads</th><th>New cust.</th><th>% conv.</th>
+              <th>CAC</th><th>LTV/CAC</th><th>CAC Payback</th><th>MRR ativo</th><th>Invest. total</th><th>Receita</th><th>{GROSS_MARGIN < 1 ? 'Contribuição' : 'Net'}</th>
             </tr></thead>
             <tbody>{v.ef.map((r) => (
               <tr key={r.key}>
-                <td>{short(r.name) || r.key}</td><td>{r.registered ? '🟢' : '—'}</td>
+                <td className="email" title={r.name || ''}>{r.email || r.key}</td><td>{r.registered ? '🟢' : '—'}</td>
                 <td className={r.mrrShare > 0.3 ? 'neg' : ''}>{pct(r.mrrShare)}</td>
                 <td>{r.leads}</td><td>{r.newCustomers}</td><td>{pct(r.taxaConversao)}</td>
                 <td>{r.cac != null ? money(r.cac) : '—'}</td><td><LtvCac x={r.ltvCac} /></td><td><Payback m={r.payback} /></td>
@@ -371,20 +373,30 @@ export default function Dashboard({ session }) {
       </Section>
 
       {/* Churn & saúde */}
-      <Section id="saude" title="Churn & saúde do programa" sub="Quem está cadastrado no programa, quem de fato traz indicação e quem gera cliente pagante. São dois universos: os cadastrados no Pipedrive e quem realmente indicou (com ou sem cadastro).">
+      <Section id="saude" title="Churn & saúde do programa" sub="Churn e vida do cliente + o retrato dos embaixadores em 3 blocos que se encaixam: o roster formal do Pipedrive (funil 45), quem de fato indica, e quem gera cliente pagante.">
         <div className="stats">
-          <Stat l="Churn no período" v={pct(v.qual.churnRate)} sub={`Dos ${v.qual.churnDen} clientes ativos no início do período, ${v.qual.churned} cancelaram até agora. É churn ACUMULADO da janela (${v.qual.nMonths} ${v.qual.nMonths === 1 ? 'mês' : 'meses'}) — quanto maior o período, maior o número. Para comparar entre períodos ou com benchmark, use o "Churn mensal" ao lado.`} bad />
-          <Stat l="Churn mensal (equiv.)" v={pct(v.qual.churnMonthly)} sub={`O mesmo churn normalizado para uma taxa MENSAL equivalente (hazard constante), independente do tamanho da janela — é o número comparável entre períodos e com mercado. ATENÇÃO: a média mensal esconde o cliff do mês 4; veja a curva na seção Retenção.`} bad />
-          <Stat l="Lifetime (mediana–média)" v={v.lifeLow != null && v.lifeHigh != null ? `${Math.round(v.lifeLow)}–${Math.round(v.lifeHigh)} meses` : '—'} sub="A vida do cliente é BIMODAL: ~metade cancela no cliff do mês 4 (logo após a comissão de 3 meses) e vive pouco; os que sobrevivem ficam muito tempo. Por isso a MEDIANA (~7m, piso da faixa) é bem menor que a MÉDIA (~10m, topo — Kaplan-Meier com cauda). A média é o que o LTV usa, mas ela ESCONDE o cliff. Por isso: decida pelo CAC Payback e olhe o alerta na seção Retenção." />
-          {f.programa !== 'parceiro' && <>
-          <Stat l="Cadastrados" v={v.sau.cadastradosTotal} sub={`Embaixadores formalmente cadastrados no funil do Pipedrive. Destes, ${v.sau.embaixadoresAtivos} estão no estágio "Ativados".`} />
-          <Stat l="Cadastrados que indicaram" v={`${v.sau.cadastradosQueIndicaram}/${v.sau.cadastradosTotal}`} sub={`Dos ${v.sau.cadastradosTotal} cadastrados, quantos realmente trouxeram ao menos 1 lead. Apenas ${v.sau.cadastradosComCliente} chegaram a trazer um cliente pagante.`} />
-          <Stat l="Sem cadastro que indicaram" v={v.sau.indicadoresSemCadastro} sub="Pessoas que trouxeram indicações sem estar cadastradas no programa. Muitas vezes trazem tanto resultado quanto os cadastrados." />
-          <Stat l="Total que indicaram" v={v.sau.totalQueIndicaram} sub={`Todo mundo que trouxe ao menos 1 indicação: ${v.sau.cadastradosQueIndicaram} cadastrados + ${v.sau.indicadoresSemCadastro} sem cadastro.`} />
-          <Stat l="Pessoas no programa" v={v.sau.totalPessoas} sub={`Universo total envolvido: os ${v.sau.cadastradosTotal} cadastrados mais os ${v.sau.indicadoresSemCadastro} que indicaram sem se cadastrar.`} />
-          <Stat l="Embaixadores que converteram" v={pct(v.sau.taxaConversaoIndicadores)} sub={`Dos ${v.sau.totalQueIndicaram} que indicaram, ${v.sau.indicadoresComCliente} geraram pelo menos 1 cliente pagante. Mostra quantos indicadores realmente convertem.`} />
-          </>}
+          <Stat l="Churn no período" v={pct(v.qual.churnRate)} sub={`Dos ${v.qual.churnDen} clientes ativos no início do período, ${v.qual.churned} cancelaram até agora. É churn ACUMULADO da janela (${v.qual.nMonths} ${v.qual.nMonths === 1 ? 'mês' : 'meses'}) — quanto maior o período, maior o número. Para comparar, use o "Churn mensal" ao lado.`} bad />
+          <Stat l="Churn mensal (equiv.)" v={pct(v.qual.churnMonthly)} sub={`O mesmo churn normalizado para taxa MENSAL equivalente (independe do tamanho da janela) — é o número comparável com o mercado. ATENÇÃO: a média mensal esconde o cliff dos meses 4–5; veja a curva na seção Retenção.`} bad />
+          <Stat l="Lifetime do cliente" v={v.life.median != null ? `~${v.life.median.toFixed(1)} m (mediana)` : '—'} sub={`Metade dos clientes cancela até ~${v.life.median != null ? v.life.median.toFixed(1) : '?'} meses (mediana). ${v.life.s6 != null ? Math.round(v.life.s6 * 100) : '?'}% chegam a 6 meses e ${v.life.s12 != null ? Math.round(v.life.s12 * 100) : '?'}% a 12 meses. A média (${v.life.mean != null ? v.life.mean.toFixed(1) : '?'}m, usada no LTV) é bem maior porque os sobreviventes vivem muito — mas ela ESCONDE o cliff dos meses 4–5. Decida pelo CAC Payback.`} />
+          <Stat l="Chegam a 6 meses" v={v.life.s6 != null ? pct(v.life.s6) : '—'} sub="Percentual de clientes que continua ativo 6 meses após virar cliente (curva de sobrevivência real). Abaixo disso, o cliente não passou do cliff dos meses 4–5." />
+          <Stat l="Chegam a 12 meses" v={v.life.s12 != null ? pct(v.life.s12) : '—'} sub="Percentual que continua ativo 12 meses após virar cliente. É a cauda de sobreviventes que sustenta o LTV." />
         </div>
+        {f.programa !== 'parceiro' && <>
+        <h3 className="sub-head">Embaixadores — roster formal (Pipedrive)</h3>
+        <div className="stats">
+          <Stat l="No funil" v={v.sau.noFunil} sub={`Total de deals no funil de embaixadores (todos os estágios). Destes, ${v.sau.ativos} estão em "Ativados" e ${v.sau.emProcesso} ainda em processo (demonstração/negociação/onboarding).`} />
+          <Stat l="Ativos" v={v.sau.ativos} sub={`Embaixadores no estágio "Ativados" — os que de fato estão no programa. É a base que importa para as taxas.`} />
+          <Stat l="Em processo" v={v.sau.emProcesso} sub="Deals ainda em demonstração, negociação ou onboarding — não são embaixadores ativos ainda." />
+          <Stat l="Ativos com fixo" v={`${v.sau.comFixo} · ${money(v.sau.fixoTotal)}/mês`} sub={`Dos ${v.sau.ativos} ativos, quantos recebem fixo (cada um com seu valor; permuta/só-comissão não recebem). Soma dos fixos = ${money(v.sau.fixoTotal)}/mês.`} />
+        </div>
+        <h3 className="sub-head">Quem realmente indica e converte</h3>
+        <div className="stats">
+          <Stat l="Que indicaram (total)" v={v.sau.totalQueIndicaram} sub={`Todo mundo que trouxe ao menos 1 indicação: ${v.sau.cadastradosQueIndicaram} cadastrados no funil + ${v.sau.semCadastroQueIndicaram} sem cadastro (ex.: Darlan). Nem todo cadastrado indica, e muita gente indica sem se cadastrar.`} />
+          <Stat l="Ativos que indicam" v={`${v.sau.ativosQueIndicaram}/${v.sau.ativos}`} sub={`Dos ${v.sau.ativos} embaixadores ativos, quantos realmente trouxeram indicação (${pct(v.sau.taxaIndicamAtivos)}). Estar ativo no funil ≠ estar indicando.`} />
+          <Stat l="Sem cadastro que indicam" v={v.sau.semCadastroQueIndicaram} sub="Pessoas que indicam sem estar no funil do Pipedrive. Frequentemente trazem tanto (ou mais) que os cadastrados." />
+          <Stat l="Geraram cliente pagante" v={`${v.sau.queGeraramCliente}/${v.sau.totalQueIndicaram}`} sub={`Dos ${v.sau.totalQueIndicaram} que indicaram, ${v.sau.queGeraramCliente} chegaram a gerar ao menos 1 cliente pagante (${pct(v.sau.taxaConversaoIndicadores)}). Destes, ${v.sau.ativosQueGeraramCliente} são ativos do funil e ${v.sau.semCadastroQueGeraramCliente} sem cadastro.`} />
+        </div>
+        </>}
       </Section>
 
       {/* Mix de Tier */}

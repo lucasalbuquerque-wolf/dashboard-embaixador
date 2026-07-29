@@ -193,6 +193,8 @@ table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 10px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 th { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted2); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
 td:nth-child(n+3), th:nth-child(n+3) { text-align: right; }
+td.email { font-family: var(--font-mono); font-size: 11px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.sub-head { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
 td:nth-child(n+3) { font-variant-numeric: tabular-nums; }
 tbody tr:hover { background: var(--surface-2); }
 

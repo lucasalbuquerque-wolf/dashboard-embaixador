@@ -66,18 +66,22 @@ export function leadsByReferrer(leads, range) {
 
 // ---- custo do programa (fixo + comissão), mês a mês ---------------------
 function ambFixos(ambassadors) {
-  // Regra (confirmada com Lucas): tem fixo QUEM tem o valor de fixo no Pipedrive (fixo_mensal>0).
-  // Nem todo cadastrado tem fixo — os sem valor só ganham comissão pelos clientes.
-  // Conta a partir do piso (jan/2026); a data de criação no funil não importa para o recorte.
-  return (ambassadors || []).filter((a) => (a.fixo_mensal || 0) > 0)
+  // Regra (confirmada com Lucas): fixo SÓ para embaixadores em "Ativados" (is_ativado) E que têm
+  // valor de fixo (fixo_mensal>0 — cada um tem o SEU; permuta / só-comissão têm 0 e saem sozinhos).
+  // Conta a partir do PISO jan/2026 (esquece 2025): quem já tinha fixo em 2025 passa a contar só de
+  // jan/2026; quem entrou em 2026 conta do mês de entrada (o loop de meses começa no piso, então
+  // 'start' anterior a jan/2026 é clampado para jan/2026; nunca conta antes de o embaixador existir).
+  return (ambassadors || []).filter((a) => a.is_ativado && (a.fixo_mensal || 0) > 0)
     .map((a) => ({ fixo: a.fixo_mensal, start: ym(a.data_criacao) || FLOOR_YM }))
 }
-function monthlyCost(clients, ambassadors, M) {
-  const commission = clients.filter((c) => { const s = ym(wonDate(c)), e = ym(c.cancelation_date); return s && s <= M && (!e || e > M) && monthsBetweenYm(s, M) < 3 })
-    .reduce((s, c) => s + (c.cmv || 0), 0)
-  const fixo = ambFixos(ambassadors).filter((a) => a.start && a.start <= M).reduce((s, a) => s + a.fixo, 0)
-  return commission + fixo
+function monthlyFixo(ambassadors, M) {
+  return ambFixos(ambassadors).filter((a) => a.start && a.start <= M).reduce((s, a) => s + a.fixo, 0)
 }
+function monthlyCommission(clients, M) {
+  return clients.filter((c) => { const s = ym(wonDate(c)), e = ym(c.cancelation_date); return s && s <= M && (!e || e > M) && monthsBetweenYm(s, M) < 3 })
+    .reduce((s, c) => s + (c.cmv || 0), 0)
+}
+function monthlyCost(clients, ambassadors, M) { return monthlyCommission(clients, M) + monthlyFixo(ambassadors, M) }
 function daysInMonth(M) {
   const [y, mo] = M.split('-').map(Number)
   return [31, (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1]
@@ -96,6 +100,18 @@ function periodCost(clients, ambassadors, range) {
   return monthRange(range.from.slice(0, 7), range.to.slice(0, 7))
     .reduce((s, M) => s + monthlyCost(clients, ambassadors, M) * monthFraction(M, range), 0)
 }
+// SÓ o fixo do período (sem comissão), prorateado — base do "custo por lead" (decisão do Lucas:
+// o lead só custa o fixo; a comissão só existe se fechar, e aí já é cliente, não lead).
+function periodFixo(ambassadors, range) {
+  return monthRange(range.from.slice(0, 7), range.to.slice(0, 7))
+    .reduce((s, M) => s + monthlyFixo(ambassadors, M) * monthFraction(M, range), 0)
+}
+// Duração da janela em MESES por dias reais (não buckets de mês-calendário) — usado para
+// normalizar churn e GRR acumulados para taxa mensal equivalente, comparável entre janelas.
+function windowMonths(range) {
+  const days = (D(range.to) - D(range.from)) / 86400000 + 1
+  return Math.max(0.03, days / 30.44)
+}
 
 // ---- KPIs do período (cards do topo) ------------------------------------
 export function computeKpis(clients, leads, ambassadors, range) {
@@ -106,13 +122,14 @@ export function computeKpis(clients, leads, ambassadors, range) {
   const mrrAtivo = activeC.reduce((s, c) => s + (c.cmv || 0), 0)
   const newMrr = ganhosC.reduce((s, c) => s + (c.cmv || 0), 0)
   const custo = Math.round(periodCost(clients, ambassadors, range))
+  const custoFixo = Math.round(periodFixo(ambassadors, range))
   return {
-    leads: nLeads, ganhos: ganhosC.length, custo,
+    leads: nLeads, ganhos: ganhosC.length, custo, custoFixo,
     cancelados: cancelC.length, newMrr,
     taxaConversao: nLeads ? ganhosC.length / nLeads : null,
     clientesAtivos: activeC.length, mrrAtivo, arpa: activeC.length ? mrrAtivo / activeC.length : 0,
-    custoPorLead: nLeads ? custo / nLeads : null,          // custo do programa ÷ leads
-    custoPorCliente: ganhosC.length ? custo / ganhosC.length : null, // ÷ novos clientes
+    custoPorLead: nLeads ? custoFixo / nLeads : null,      // SÓ FIXO ÷ leads (comissão só existe se fechar)
+    custoPorCliente: ganhosC.length ? custo / ganhosC.length : null, // (fixo+comissão) ÷ novos clientes
   }
 }
 
@@ -164,6 +181,22 @@ export function curveLifetime(clients, asOf, disc = LTV_DISCOUNT_MONTHLY, tail =
   return life
 }
 
+// Resumo de lifetime que COMUNICA (decisão do Lucas: "7-11 meses não me diz nada").
+// Devolve mediana de sobrevivência (onde a curva cruza 50%) + % que chega a 6 e 12 meses.
+export function lifetimeSummary(clients, asOf) {
+  const rc = retentionCurve(clients, asOf, [0, 1, 2, 3, 4, 5, 6, 9, 12]).filter((p) => p.pct != null)
+  const at = (k) => { const p = rc.find((x) => x.offset === k); return p ? p.pct : null }
+  let median = null
+  for (let i = 1; i < rc.length; i++) {
+    const a = rc[i - 1], b = rc[i]
+    if (a.pct >= 0.5 && b.pct < 0.5) {                    // interpola onde cruza 50%
+      median = a.offset + (b.offset - a.offset) * (a.pct - 0.5) / (a.pct - b.pct)
+      break
+    }
+  }
+  return { median, s6: at(6), s12: at(12), mean: curveLifetime(clients, asOf) }
+}
+
 // Heatmap de retenção POR SAFRA (cohort de aquisição). Linhas = mês em que viraram cliente;
 // colunas = % ainda ativo N meses depois. Célula null = safra ainda não teve N meses para envelhecer.
 export function cohortRetentionMatrix(clients, asOf, offsets = [0, 1, 2, 3, 6]) {
@@ -194,11 +227,18 @@ export function mrrSection(clients, range) {
   const mrrLost = clients.filter((c) => inRange(c.cancelation_date, range)).reduce((s, c) => s + (c.cmv || 0), 0)
   // FIX (auditoria A6): revenue churn / GRR sobre a BASE que existia no início (não inclui novos).
   const mrrLostBase = base.filter((c) => inRange(c.cancelation_date, range)).reduce((s, c) => s + (c.cmv || 0), 0)
+  const grossMrrChurn = mrrFrom ? mrrLostBase / mrrFrom : null
+  const grr = mrrFrom ? (mrrFrom - mrrLostBase) / mrrFrom : null
+  // FIX (revisão): GRR/revenue-churn ACUMULADOS dependem da janela (7m dá ~62%, parece ruim vs
+  // benchmark mensal de 85-95%). Normaliza para MENSAL equivalente, igual ao churn de contagem.
+  const wMonths = windowMonths(range)
+  const revChurnMonthly = grossMrrChurn != null && grossMrrChurn < 1 ? 1 - Math.pow(1 - grossMrrChurn, 1 / wMonths) : grossMrrChurn
+  const grrMonthly = revChurnMonthly != null ? 1 - revChurnMonthly : null
   return {
-    mrrAtivo, mrrLost, netGain: newMrr - mrrLost,
+    mrrAtivo, mrrLost, mrrLostBase, netGain: newMrr - mrrLost,
     mrrGrowth: mrrFrom ? (mrrAtivo - mrrFrom) / mrrFrom : null,
-    grossMrrChurn: mrrFrom ? mrrLostBase / mrrFrom : null,   // % da receita da base que sangrou
-    grr: mrrFrom ? (mrrFrom - mrrLostBase) / mrrFrom : null, // retenção bruta de receita (<=100%)
+    grossMrrChurn, grr,                 // acumulados do período (rótulo deve dizer "no período")
+    revChurnMonthly, grrMonthly,        // equivalentes MENSAIS (comparáveis com benchmark)
   }
 }
 
@@ -246,8 +286,9 @@ export function qualidade(clients, range) {
   // FIX (revisão métricas): o churn ACUMULADO do período depende do tamanho da janela (mesmo
   // erro do lifetime) — 7 meses dá ~44%, 1 mês ~10%, e nenhum é comparável a benchmark mensal.
   // Normaliza para uma taxa MENSAL equivalente (hazard constante) → comparável entre janelas.
-  const nMonths = Math.max(1, monthsBetweenYm(range.from.slice(0, 7), range.to.slice(0, 7)) + 1)
-  const churnMonthly = churnRate != null && churnRate < 1 ? 1 - Math.pow(1 - churnRate, 1 / nMonths) : churnRate
+  const nMonths = Math.max(1, monthsBetweenYm(range.from.slice(0, 7), range.to.slice(0, 7)) + 1) // p/ o rótulo humano
+  const wMonths = windowMonths(range)                                                             // p/ a MATEMÁTICA (por dias)
+  const churnMonthly = churnRate != null && churnRate < 1 ? 1 - Math.pow(1 - churnRate, 1 / wMonths) : churnRate
   return { churnRate, churnMonthly, nMonths, churned: churned.length, churnDen: activeStart.length, lifetime: programLifetime(clients, asOf) }
 }
 
@@ -261,30 +302,39 @@ export const activeClients = (clients, range) => clients.filter((c) => activeAsO
 
 // ---- Saúde do programa --------------------------------------------------
 export function saudePrograma(ambassadors, referrers) {
-  // Dois universos distintos — manter explícitos para que os números reconciliem:
-  //  • ambassadors = cadastrados no Pipedrive (matriculados no programa)
-  //  • referrers programa=embaixador = quem de fato indicou ≥1 lead (cadastrado ou não)
+  // TRÊS blocos que reconciliam (decisão do Lucas — clareza cadastrado/ativo/indicou):
+  //  1) ROSTER formal do Pipedrive (funil 45): no funil / ativos / em processo / com fixo
+  //  2) Quem REALMENTE indica (referrers programa=embaixador): total / dos ativos / sem cadastro
+  //  3) Quem GERA cliente pagante: total / dos ativos / sem cadastro
+  const ambById = Object.fromEntries(ambassadors.map((a) => [a.pd_deal_id, a]))
+  const ativos = ambassadors.filter((a) => a.is_ativado)
+  const comFixo = ativos.filter((a) => (a.fixo_mensal || 0) > 0)   // fixo só conta p/ ativos (Lucas)
+  const fixoTotal = comFixo.reduce((s, a) => s + (a.fixo_mensal || 0), 0)
   const emb = referrers.filter((r) => r.programa === 'embaixador')
-  const comCliente = (arr) => arr.filter((r) => (r.n_clients || 0) > 0).length
-  const cadastradosQueIndicaram = emb.filter((r) => r.registered)   // ⊆ ambassadors
-  const semCad = emb.filter((r) => !r.registered)                  // disjunto de ambassadors
-  const nCad = ambassadors.length
+  const withCli = (arr) => arr.filter((r) => (r.n_clients || 0) > 0)
+  const cadastrados = emb.filter((r) => r.registered)              // indicaram E estão no funil
+  const semCad = emb.filter((r) => !r.registered)                  // indicaram sem estar no funil
+  const isAtivoRef = (r) => !!(r.pd_ambassador_id && ambById[r.pd_ambassador_id]?.is_ativado)
+  const ativosQueIndicaram = cadastrados.filter(isAtivoRef)
   return {
-    // universo 1 — cadastrados (tabela ambassadors)
-    cadastradosTotal: nCad,                                          // ex.: 26
-    embaixadoresAtivos: ambassadors.filter((a) => a.is_ativado).length, // 20 (estágio Ativados)
-    cadastradosQueIndicaram: cadastradosQueIndicaram.length,         // 13
-    cadastradosComCliente: comCliente(cadastradosQueIndicaram),      // 5
-    // universo 2 — quem indicou (tabela referrers, programa=embaixador)
-    indicadoresSemCadastro: semCad.length,                          // 17
-    totalQueIndicaram: emb.length,                                  // 30 = 13 + 17
-    indicadoresComCliente: comCliente(emb),                         // 17
-    // universo 3 — todas as pessoas do programa (cadastrados ∪ sem cadastro que indicaram)
-    totalPessoas: nCad + semCad.length,                             // 43 = 26 + 17
-    // taxas — cada uma 100% consistente com seu denominador
-    taxaIndicacaoCadastrados: nCad ? cadastradosQueIndicaram.length / nCad : null, // 13/26
-    taxaConversaoCadastrados: nCad ? comCliente(cadastradosQueIndicaram) / nCad : null, // 5/26
-    taxaConversaoIndicadores: emb.length ? comCliente(emb) / emb.length : null,    // 17/30
+    // 1) roster
+    noFunil: ambassadors.length,                          // 29 (todos os estágios)
+    ativos: ativos.length,                                // 23 (estágio "Ativados")
+    emProcesso: ambassadors.length - ativos.length,       // 6 (demo/negociação/onboarding)
+    comFixo: comFixo.length,                              // 19 (ativos com fixo>0)
+    fixoTotal,                                            // R$/mês somado
+    // 2) quem indica
+    totalQueIndicaram: emb.length,                        // 31
+    ativosQueIndicaram: ativosQueIndicaram.length,        // 12
+    cadastradosQueIndicaram: cadastrados.length,          // 13
+    semCadastroQueIndicaram: semCad.length,               // 18
+    // 3) quem gera cliente pagante
+    queGeraramCliente: withCli(emb).length,               // 20
+    ativosQueGeraramCliente: withCli(ativosQueIndicaram).length, // 6
+    semCadastroQueGeraramCliente: withCli(semCad).length, // 13
+    // taxas (denominador = ATIVOS, a base que importa)
+    taxaIndicamAtivos: ativos.length ? ativosQueIndicaram.length / ativos.length : null,
+    taxaConversaoIndicadores: emb.length ? withCli(emb).length / emb.length : null,
   }
 }
 
@@ -332,12 +382,12 @@ export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, ra
   for (const c of clients) (byRef[c.referrer_key] ||= []).push(c)
   const rows = []
   for (const r of referrers) {
-    // Respeita o filtro: só processa referenciadores que têm clientes no escopo atual (byRef).
+    // TODOS os indicadores do programa aparecem (decisão do Lucas), inclusive quem ainda não gerou
+    // cliente. O caller passa os referrers já escopados por programa (embaixador/parceiro/todos).
     const cls = byRef[r.referrer_key] || []
-    if (!cls.length) continue
     const registered = !!r.registered
     const amb = registered && r.pd_ambassador_id ? ambById[r.pd_ambassador_id] : null
-    const fixoMensal = amb ? (amb.fixo_mensal || 0) : 0   // fixo = quem tem valor no Pipedrive
+    const fixoMensal = (amb && amb.is_ativado) ? (amb.fixo_mensal || 0) : 0   // fixo SÓ p/ Ativados (Lucas)
     // lifetime (vida toda)
     let comissaoTot = 0, receitaTot = 0, mrrAtivo = 0
     for (const c of cls) {
@@ -346,8 +396,9 @@ export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, ra
       receitaTot += (c.cmv || 0) * m
       if (activeAsOf(c, asOfDay)) mrrAtivo += c.cmv || 0
     }
-    // FIX (auditoria A8/C1): fixo conta com o mesmo fallback de data (FLOOR_DATE) do custo.
-    const fixoMeses = fixoMensal ? monthsSince((amb && amb.data_criacao) || FLOOR_DATE, asOf) : 0
+    // Fixo conta a partir do PISO jan/2026 (esquece 2025); nunca antes da criação do embaixador.
+    const fixoStart = amb && amb.data_criacao && amb.data_criacao > FLOOR_DATE ? amb.data_criacao : FLOOR_DATE
+    const fixoMeses = fixoMensal ? monthsSince(fixoStart, asOf) : 0
     const investimentoTotal = fixoMensal * fixoMeses + comissaoTot
     // cohort do período (clientes adquiridos no range)
     const cohort = cls.filter((c) => inRange(wonDate(c), range))
@@ -365,7 +416,7 @@ export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, ra
     }
     const nLeads = leadsByRef[r.referrer_key] || 0
     rows.push({
-      key: r.referrer_key, name: r.name, registered, leads: nLeads, newCustomers,
+      key: r.referrer_key, email: r.email || r.referrer_key, name: r.name, registered, leads: nLeads, newCustomers,
       taxaConversao: nLeads ? newCustomers / nLeads : null, cac, ltvCac, payback, mrrAtivo,
       investimentoTotal, receita: receitaTot, net: receitaTot * GROSS_MARGIN - investimentoTotal,
     })
