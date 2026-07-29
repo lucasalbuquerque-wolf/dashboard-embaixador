@@ -43,6 +43,10 @@ export function monthsActive(c, asOf) {
 export function monthsSince(iso, asOf) { const s = D(iso); return s ? Math.max(0, Math.round((asOf - s) / MS_MONTH)) : 0 }
 
 // ---- anotação e escopo --------------------------------------------------
+// Programa/cadastro vêm do REFERENCIADOR (regra do Lucas: um referenciador = UM programa; só 4 de
+// 216 têm tags mistas e a maioria resolve — Darlan 2738 emb vs 2 par etc.). A classificação do
+// referenciador é feita no sync (build_referrers: roster do funil 45→embaixador / 46→parceiro,
+// senão a MAIORIA real das tags; @umbler → interno, fora dos programas).
 export function annotate(items, referrers) {
   const ref = Object.fromEntries(referrers.map((r) => [r.referrer_key, r]))
   return items.map((c) => ({ ...c, _programa: ref[c.referrer_key]?.programa || 'indefinido', _registered: !!ref[c.referrer_key]?.registered }))
