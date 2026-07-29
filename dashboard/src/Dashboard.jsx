@@ -259,7 +259,7 @@ export default function Dashboard({ session }) {
       </Section>
 
       {/* Concentração de risco */}
-      <Section id="concentracao" title="Concentração de risco" sub={`Quanto do MRR do programa depende de poucos ${indLabel}. Se os maiores saírem, quanto da receita cai junto. Quanto mais concentrado no topo, mais frágil o programa.`}>
+      <Section id="concentracao" title="Concentração de risco" sub={`Quanto do MRR do programa depende de poucos ${indLabel}. Se os maiores saírem, quanto da receita cai junto. Quanto mais concentrado no topo, mais frágil o programa. É uma FOTO da base ativa no fim do período — por isso não muda entre "últimos 7/30/90 dias" (todos terminam hoje, mesma foto, igual "MRR ativo"); só muda quando a data final muda (ex.: "mês passado").`}>
         {v.conc.top[0] && (
           <p className="conc-summary">
             Os <b>3 maiores</b> {indLabel} concentram <b className={v.conc.top3 > 0.6 ? 'neg' : ''}>{pct(v.conc.top3)}</b> do MRR ativo

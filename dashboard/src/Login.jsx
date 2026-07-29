@@ -18,10 +18,6 @@ export default function Login() {
   return (
     <div className="center">
       <form className="card login" onSubmit={submit}>
-        <div className="brand" style={{ justifyContent: 'center', padding: '0 0 4px' }}>
-          <div className="mk">U</div>
-          <div className="bt" style={{ textAlign: 'left' }}><b>Umbler</b></div>
-        </div>
         <h1>Entrar</h1>
         <p className="muted" style={{ marginTop: '-6px' }}>Dashboard de ROI dos programas de indicação</p>
         <input type="email" placeholder="e-mail" value={email}
