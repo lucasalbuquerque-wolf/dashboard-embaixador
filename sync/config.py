@@ -40,6 +40,7 @@ JSON_PATH = DATA_DIR / "data.json"
 
 # --- Pipedrive: IDs validados ao vivo (ver memoria pipedrive-integration) ---
 PIPE_EMBAIXADOR = 45
+PIPE_PARCEIRO = 46          # funil "Partners" (roster de parceiros formais; sem fixo)
 STAGE_ATIVADOS = 324
 STAGE_INATIVOS = 305
 STAGE_NAMES = {
@@ -56,6 +57,8 @@ CF_ABORDAGEM = "2825da1716b949d48c4a4ea3321e715de4b20a24"
 
 # Opcoes de origem -> programa (para desempate quando referred_program vem vazio)
 ORIGEM_EMBAIXADOR = {1134, 723, 884, 1103}
-ORIGEM_PARCEIRO = {1135, 722, 886, 583, 111}
+# 583 "Indicacao - Parceiro" REMOVIDO (revisao 2026-07): e' o MESMO label que clientes GANHOS
+# de embaixador carregam -> contaminava a classificacao de parceiro (SA-3).
+ORIGEM_PARCEIRO = {1135, 722, 886, 111}
 ORIGEM_CS = {950, 858, 951, 883, 1159, 1136, 266, 429, 1158}
 ORIGEM_INDIQUE = {721, 885, 579}

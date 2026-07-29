@@ -158,6 +158,30 @@ def load_ambassadors(pd: Pipedrive):
     return ambs, roster_emails, roster_names
 
 
+def load_partners(pd: Pipedrive):
+    """Funil 46 (Partners) -> roster de PARCEIROS formais (email/nome) para classificar referrers.
+    Parceiro nao tem fixo (value=0 no funil 46); o roster serve so' para marcar quem e' parceiro
+    formal e impedir que a maioria de tags o classifique errado."""
+    emails, names = set(), set()
+    try:
+        deals = pd.pipeline_deals(config.PIPE_PARCEIRO)
+    except Exception as e:
+        print(f"      load_partners ERRO (segue sem roster de parceiro): {str(e)[:150]}")
+        return emails, names
+    for d in deals:
+        pid = d.get("person_id")
+        pid = pid.get("value") if isinstance(pid, dict) else pid
+        if not pid:
+            continue
+        pr = pd.person(pid)
+        if pr.get("name"):
+            names.add(norm(pr["name"]))
+        for em in (pr.get("email") or []):
+            if em.get("value"):
+                emails.add(norm_email(em["value"]))
+    return emails, names
+
+
 def load_referred(cio: Cio, pd: Pipedrive, roster_emails, roster_names):
     """Puxa TODOS os referidos (leads + clientes). converted = tem contract_month_value > 0.
     Para os convertidos, busca o deal (won_time + desempate de origem)."""
@@ -230,7 +254,9 @@ def load_referred(cio: Cio, pd: Pipedrive, roster_emails, roster_names):
 
 
 # ----------------------------- transform ----------------------------------
-def build_referrers(leads, roster_emails, roster_names):
+def build_referrers(leads, roster_emails, roster_names, partner_emails=None, partner_names=None):
+    partner_emails = partner_emails or set()
+    partner_names = partner_names or set()
     groups = {}
     for l in leads:
         g = groups.setdefault(l["referrer_key"], {
@@ -249,13 +275,18 @@ def build_referrers(leads, roster_emails, roster_names):
     refs = []
     for key, g in groups.items():
         registered = (key in roster_emails) or (norm(g["name"]) in roster_names)
+        in_partner = (key in partner_emails) or (norm(g["name"]) in partner_names)
         non_indef = [p for p in g["progs"] if p != "indefinido"]
+        # Classificacao ROSTER-FIRST (revisao 2026-07, SA-3): o funil formal manda; so' depois a
+        # maioria REAL das tags. Antes a regra "embaixador vence se presente" apagava parceiros mistos.
         if is_internal(g["email"]) or is_internal(key):
-            programa = "interno"       # auditoria: contas @umbler.com não são embaixadores/parceiros
-        elif registered or "embaixador" in non_indef:
-            programa = "embaixador"
+            programa = "interno"       # contas @umbler.com nao sao embaixadores/parceiros
+        elif registered:
+            programa = "embaixador"    # roster formal do funil 45
+        elif in_partner:
+            programa = "parceiro"      # roster formal do funil 46 (Partners)
         elif non_indef:
-            programa = max(set(non_indef), key=non_indef.count)
+            programa = max(set(non_indef), key=non_indef.count)   # maioria real das tags
         else:
             programa = "indefinido"
         refs.append({**{k: g[k] for k in ("referrer_key", "name", "email",
@@ -385,14 +416,15 @@ def summary(refs, clients):
 def main():
     assert config.CIO_KEY and config.PD_TOKEN, "Faltam credenciais no .env"
     cio, pd = Cio(), Pipedrive()
-    print("[1/4] Embaixadores (funil 45)...")
+    print("[1/4] Embaixadores (funil 45) + Parceiros (funil 46)...")
     ambs, r_emails, r_names = load_ambassadors(pd)
-    print(f"      {len(ambs)} embaixadores")
+    p_emails, p_names = load_partners(pd)
+    print(f"      {len(ambs)} embaixadores | {len(p_emails)} parceiros no roster")
     print("[2/4] Referidos: leads + clientes (Customer.io + deals)...")
     leads, clients = load_referred(cio, pd, r_emails, r_names)
     print(f"      {len(leads)} leads ({len(clients)} convertidos/pagantes)")
     print("[3/4] Referenciadores + investimento...")
-    refs = build_referrers(leads, r_emails, r_names)
+    refs = build_referrers(leads, r_emails, r_names, p_emails, p_names)
     mark_investment_active(ambs, refs)
     print(f"      {len(refs)} referenciadores")
     print("[4/4] Gravando SQLite + Supabase + data.json...")
