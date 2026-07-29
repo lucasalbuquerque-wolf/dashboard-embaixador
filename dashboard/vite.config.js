@@ -8,3 +8,4 @@ export default defineConfig(({ mode }) => ({
   base: mode === 'production' ? '/dashboard-embaixador/' : '/',
   server: { port: 5173 },
 }))
+
