@@ -1,0 +1,56 @@
+name: Deploy dashboard (GitHub Pages)
+
+# Publica o dashboard no GitHub Pages a cada push que mexe no frontend.
+# O dado NÃO vem daqui — o site lê o Supabase ao vivo (o robô de sync atualiza o banco).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'dashboard/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # As variáveis VITE_ vêm do dashboard/.env.production (commitado; só chaves públicas).
+      - name: Build
+        working-directory: dashboard
+        run: |
+          npm ci
+          npm run build
+
+      # Habilita o Pages automaticamente (fonte = GitHub Actions) na 1ª vez.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
