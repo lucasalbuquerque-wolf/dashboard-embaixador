@@ -322,7 +322,7 @@ export default function Dashboard({ session }) {
       </Section>
 
       {/* Retenção (curva de sobrevivência) */}
-      <Section id="retencao" title="Retenção (curva de sobrevivência)" sub="Dos clientes que já tiveram tempo de chegar ao mês N depois de virarem cliente, quantos % continuam ativos. Mostra a forma da retenção — em que mês os clientes começam a cancelar.">
+      <Section id="retencao" title="Retenção (curva de sobrevivência)" sub="Dos clientes que já tiveram tempo de chegar ao mês N depois de virarem cliente, quantos % continuam ativos. Mostra a forma da retenção — em que mês os clientes começam a cancelar. Esta CURVA usa TODA a base pelo tempo de vida real de cada cliente (é o melhor estimador para o lifetime/LTV, com mais dados na cauda). O heatmap por safra logo abaixo é OUTRA visão — só cohorts de 2026 — por isso os dois números podem diferir para o mesmo mês, especialmente com poucas amostras.">
         {(() => {
           const s = (k) => (v.ret.find((p) => p.offset === k) || {}).pct
           const s3 = s(3), s6 = s(6)
@@ -344,7 +344,7 @@ export default function Dashboard({ session }) {
             <Line type="monotone" dataKey="pct" stroke="#1A5CFF" strokeWidth={2} dot={{ r: 3 }} />
           </LineChart>
         </ResponsiveContainer>
-        <div className="small muted" style={{ margin: '16px 0 8px' }}>Por safra de aquisição (mês em que viraram cliente) — % ainda ativo N meses depois. Verde = retém melhor.</div>
+        <div className="small muted" style={{ margin: '16px 0 8px' }}>Por safra de aquisição (mês em que viraram cliente), <b>só cohorts de 2026</b> — % ainda ativo N meses depois. Verde = retém melhor. Difere da curva acima (que usa toda a base) porque aqui cada linha é uma safra jovem, sem os sobreviventes antigos.</div>
         <div className="tablewrap">
           <table className="heatmap">
             <thead><tr><th>Safra</th><th>Clientes</th>{RET_OFFSETS.map((k) => <th key={k}>M{k}</th>)}</tr></thead>
