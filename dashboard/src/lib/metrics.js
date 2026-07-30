@@ -404,6 +404,11 @@ export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, ra
     const fixoStart = amb && amb.data_criacao && amb.data_criacao > FLOOR_DATE ? amb.data_criacao : FLOOR_DATE
     const fixoMeses = fixoMensal ? monthsSince(fixoStart, asOf) : 0
     const investimentoTotal = fixoMensal * fixoMeses + comissaoTot
+    // Fixo DO PERÍODO: só os meses do range em que o embaixador já existia (a partir de fixoStart,
+    // que já respeita o piso jan/2026). Antes usava monthsInRange cheio, inflando o CAC de quem
+    // entrou no meio do período — contradizia o investimentoTotal e o custo do topo. (FIX B1)
+    const effStartYm = fixoStart.slice(0, 7) > range.from.slice(0, 7) ? fixoStart.slice(0, 7) : range.from.slice(0, 7)
+    const fixoMesesRange = fixoMensal && effStartYm <= range.to.slice(0, 7) ? monthsBetweenYm(effStartYm, range.to.slice(0, 7)) + 1 : 0
     // cohort do período (clientes adquiridos no range)
     const cohort = cls.filter((c) => inRange(wonDate(c), range))
     const newCustomers = cohort.length
@@ -411,7 +416,7 @@ export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, ra
     if (newCustomers) {
       // FIX (auditoria): CAC usa comissão COMPROMETIDA (3 meses), não a acumulada até hoje.
       const comissaoCohort = cohort.reduce((s, c) => s + (c.cmv || 0) * 3, 0)
-      cac = (comissaoCohort + fixoMensal * monthsInRange) / newCustomers
+      cac = (comissaoCohort + fixoMensal * fixoMesesRange) / newCustomers
       arpaCohort = cohort.reduce((s, c) => s + (c.cmv || 0), 0) / newCustomers
       // FIX (auditoria C2): LTV e payback de CONTRIBUIÇÃO (margem bruta), não receita bruta.
       const arpaMargem = arpaCohort * GROSS_MARGIN
@@ -430,7 +435,7 @@ export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, ra
   return rows.sort((a, b) => b.newCustomers - a.newCustomers || b.net - a.net)
 }
 
-// ---- Séries temporais (piso 2025) ---------------------------------------
+// ---- Séries temporais (piso jan/2026) -----------------------------------
 export function monthlySeries(clients, leads, ambassadors, fromYm, toYm) {
   const cl = clients.map((c) => ({ cmv: c.cmv || 0, start: ym(wonDate(c)), end: ym(c.cancelation_date) }))
   const ld = leads.map((l) => ({ lead: ym(l.lead_date) }))
@@ -456,7 +461,7 @@ export function monthlySeries(clients, leads, ambassadors, fromYm, toYm) {
 export function mergeByIndex(primary, compare, keys) {
   return primary.map((p, i) => { const c = compare[i] || {}; const row = { ...p }; for (const k of keys) row[k + '_cmp'] = c[k]; return row })
 }
-// Curva acumulada (break-even do programa): receita − comissão − fixo, acumulado desde 2025.
+// Curva acumulada (break-even do programa): receita − comissão − fixo, acumulado desde jan/2026.
 export function cumulativeContribution(clients, ambassadors) {
   const cl = clients.map((c) => ({ cmv: c.cmv || 0, start: ym(wonDate(c)), end: ym(c.cancelation_date) }))
   const amb = ambFixos(ambassadors)

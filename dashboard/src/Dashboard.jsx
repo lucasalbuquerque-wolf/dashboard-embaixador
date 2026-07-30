@@ -120,8 +120,11 @@ export default function Dashboard({ session }) {
     const sc = scopeClients(raw.clients, f), sl = scopeLeads(raw.leads || [], f)
     const range = f.range, cmp = f.compareOn && f.compareRange ? f.compareRange : null
     const A = raw.ambassadors, R = raw.referrers
-    let series = monthlySeries(sc, sl, A, range.from.slice(0, 7), range.to.slice(0, 7))
-    if (cmp) series = mergeByIndex(series, monthlySeries(sc, sl, A, cmp.from.slice(0, 7), cmp.to.slice(0, 7)), [...NORMK, 'mrr', 'lostMrr'])
+    // FIX (reconciliação): o fixo é custo SÓ do programa embaixador (funil 45). Sob o filtro
+    // 'parceiro' o fixo tem que ser 0 (parceiro não tem fixo); assim custo(emb)+custo(par)=custo(todos).
+    const Acost = f.programa === 'parceiro' ? [] : A
+    let series = monthlySeries(sc, sl, Acost, range.from.slice(0, 7), range.to.slice(0, 7))
+    if (cmp) series = mergeByIndex(series, monthlySeries(sc, sl, Acost, cmp.from.slice(0, 7), cmp.to.slice(0, 7)), [...NORMK, 'mrr', 'lostMrr'])
     series = addNorm(series, NORMK)
     const allC = scopeClients(raw.clients, { ...f, programa: 'todos' }), allL = scopeLeads(raw.leads || [], { ...f, programa: 'todos' })
     // Eficiência: TODOS os indicadores do programa filtrado (embaixador/parceiro/ambos), mesmo sem cliente ainda.
@@ -136,7 +139,7 @@ export default function Dashboard({ session }) {
     }
     return {
       funnel,
-      kpi: computeKpis(sc, sl, A, range), kpiCmp: cmp ? computeKpis(sc, sl, A, cmp) : null,
+      kpi: computeKpis(sc, sl, Acost, range), kpiCmp: cmp ? computeKpis(sc, sl, Acost, cmp) : null,
       mrr: mrrSection(sc, range), mrrCmp: cmp ? mrrSection(sc, cmp) : null,
       qual: qualidade(sc, range), sau: saudePrograma(A, R), conc: concentracao(sc, range, R),
       ret: retentionCurve(sc, asOf), retMatrix: cohortRetentionMatrix(sc, asOf),
@@ -144,7 +147,7 @@ export default function Dashboard({ session }) {
       mrrMov: (() => { const ms = mrrSnapshotMonths(raw.mrrSnap || []); return ms.length >= 2 ? mrrMovements(raw.mrrSnap, ms[ms.length - 2], ms[ms.length - 1]) : null })(),
       snapMonths: mrrSnapshotMonths(raw.mrrSnap || []).length,
       ef: eficienciaCohort(sc, A, efRefs, leadsByReferrer(sl, range), range, asOf),
-      prog: byPrograma(allC, allL, range), payback: cumulativeContribution(sc, A),
+      prog: byPrograma(allC, allL, range), payback: cumulativeContribution(sc, Acost),
       series, compareOn: !!cmp,
       // Mix de Tier respeita programa/cadastro (mas ignora o filtro de Tier — senão vira 100% de um tier só).
       tierLeads: tierMix(scopeLeads(raw.leads || [], { ...f, tier: 'todos' }).filter((l) => inRange(l.lead_date, range))),
@@ -228,7 +231,7 @@ export default function Dashboard({ session }) {
           <Stat l="MRR ativo" v={money(v.mrr.mrrAtivo)} sub="Receita recorrente mensal da base ativa hoje: a soma do valor de contrato de todos os clientes ativos do programa. É o 'estoque' de receita." delta={v.mrrCmp && <Delta v={v.mrr.mrrAtivo} cv={v.mrrCmp.mrrAtivo} up />} />
           <Stat l="ARPA (ticket médio)" v={money(v.kpi.arpa)} sub="Ticket médio: quanto cada cliente ativo paga por mês, em média. É a receita recorrente (MRR) dividida pelo número de clientes ativos." delta={v.kpiCmp && <Delta v={v.kpi.arpa} cv={v.kpiCmp.arpa} up />} />
           <Stat l="MRR Lost" v={money(v.mrr.mrrLost)} bad sub={`Receita recorrente que saiu no período — soma do contrato de TODOS que cancelaram (fluxo total, mesma base do card "Customer Cancellations"). Destes, ${money(v.mrr.mrrLostBase)} vinham da base que já existia no início; o resto (${money(v.mrr.mrrLost - v.mrr.mrrLostBase)}) são clientes que entraram E saíram dentro do período. O GRR usa só a parte da base.`} delta={v.mrrCmp && <Delta v={v.mrr.mrrLost} cv={v.mrrCmp.mrrLost} up={false} />} />
-          <Stat l="GRR mensal (equiv.)" v={pct(v.mrr.grrMonthly)} good={v.mrr.grrMonthly >= 0.85} bad={v.mrr.grrMonthly != null && v.mrr.grrMonthly < 0.85} sub={`De tudo que a base já pagava, quanto você retém por mês (sem contar vendas novas) — normalizado para taxa MENSAL, comparável com o benchmark (saudável acima de 85-90%). No período inteiro (${v.qual.nMonths} ${v.qual.nMonths === 1 ? 'mês' : 'meses'}) o GRR acumulado foi ${pct(v.mrr.grr)} e a receita da base sangrou ${pct(v.mrr.grossMrrChurn)} — mas esse acumulado depende do tamanho da janela, por isso mostramos o mensal.`} />
+          <Stat l="GRR mensal (equiv.)" v={pct(v.mrr.grrMonthly)} good={v.mrr.grrMonthly >= 0.85} bad={v.mrr.grrMonthly != null && v.mrr.grrMonthly < 0.85} sub={`De tudo que a base já pagava, quanto você retém por mês (sem contar vendas novas) — normalizado para taxa MENSAL, comparável com o benchmark (saudável acima de 85%). No período inteiro (${v.qual.nMonths} ${v.qual.nMonths === 1 ? 'mês' : 'meses'}) o GRR acumulado foi ${pct(v.mrr.grr)} e a receita da base sangrou ${pct(v.mrr.grossMrrChurn)} — mas esse acumulado depende do tamanho da janela, por isso mostramos o mensal.`} />
           <Stat l="MRR Growth" v={pct(v.mrr.mrrGrowth)} good={v.mrr.mrrGrowth >= 0} bad={v.mrr.mrrGrowth < 0} sub="Crescimento % da receita recorrente no período: quanto o MRR ativo variou do início ao fim (inclui vendas novas e cancelamentos)." />
           <Stat l="Net Gain MRR" v={money(v.mrr.netGain)} good={v.mrr.netGain >= 0} bad={v.mrr.netGain < 0} sub="Ganho líquido de receita no período: receita nova que entrou (New MRR) menos a que saiu por cancelamento (MRR Lost)." delta={v.mrrCmp && <Delta v={v.mrr.netGain} cv={v.mrrCmp.netGain} up />} />
           <Stat l="NRR (retenção líquida)" v={v.mrrMov ? pct(v.mrrMov.nrr) : '—'} good={v.mrrMov && v.mrrMov.nrr >= 1} bad={v.mrrMov && v.mrrMov.nrr < 1}
@@ -283,7 +286,7 @@ export default function Dashboard({ session }) {
       </Section>
 
       {/* Eficiência por embaixador (cohort + CAC) */}
-      <Section id="eficiencia" title={f.programa === 'todos' ? 'Eficiência por indicador' : `Eficiência por ${f.programa}`} sub={`Economia por safra: o período seleciona os clientes adquiridos nele e mede CAC, payback e LTV/CAC dessa turma. Priorize o CAC PAYBACK para decisão — depende dos primeiros meses (observados). O LTV/CAC é referência: usa a vida média (Kaplan-Meier com cauda, ~10m), mas essa média esconde que ~metade dos clientes cancela no cliff do mês 4. O CAC inclui a comissão comprometida dos 3 meses. ${GROSS_MARGIN < 1 ? `Margem bruta de ${Math.round(GROSS_MARGIN * 100)}%.` : 'Sobre a receita cheia.'} Comissão paga a todo indicador; fixo só aos embaixadores "Ativados". Mostra TODOS os indicadores do programa, inclusive quem ainda não gerou cliente. Cada linha é identificada pelo e-mail (passe o mouse para ver o nome).`}>
+      <Section id="eficiencia" title={f.programa === 'todos' ? 'Eficiência por indicador' : `Eficiência por ${f.programa}`} sub={`Economia por safra: o período seleciona os clientes adquiridos nele e mede CAC, payback e LTV/CAC dessa turma. Priorize o CAC PAYBACK para decisão — depende dos primeiros meses (observados). O LTV/CAC é referência: usa a vida média (Kaplan-Meier com cauda), mas essa média esconde que boa parte dos clientes cancela no cliff dos meses 4-5 (veja o card "Lifetime do cliente" na seção Churn & saúde). O CAC inclui a comissão comprometida dos 3 meses. ${GROSS_MARGIN < 1 ? `Margem bruta de ${Math.round(GROSS_MARGIN * 100)}%.` : 'Sobre a receita cheia.'} Comissão paga a todo indicador; fixo só aos embaixadores "Ativados". Mostra TODOS os indicadores do programa, inclusive quem ainda não gerou cliente. Cada linha é identificada pelo e-mail (passe o mouse para ver o nome).`}>
         <div className="tablewrap">
           <table>
             <thead><tr>
@@ -328,7 +331,7 @@ export default function Dashboard({ session }) {
           if (hMid < hEarly * 1.4) return null
           return (
             <div className="callout"><i className="ph ph-warning" />
-              <div><b>Atenção: o churn dispara entre os meses 3 e 6</b> — {(hMid * 100).toFixed(0)}%/mês vs {(hEarly * 100).toFixed(0)}%/mês nos primeiros meses (~{(hMid / hEarly).toFixed(1)}× mais). Coincide com o fim da comissão de 3 meses, e o canal embaixador cai ~2× mais que o parceiro nesse ponto. Como o cliente precisa sobreviver a essa fase para pagar o CAC, investigar a causa (qualidade do lead indicado ou renovação de contrato) é prioridade.</div>
+              <div><b>Atenção: o churn dispara entre os meses 3 e 6</b> — {(hMid * 100).toFixed(0)}%/mês vs {(hEarly * 100).toFixed(0)}%/mês nos primeiros meses (~{(hMid / hEarly).toFixed(1)}× mais). Coincide com o fim da comissão de 3 meses. Como o cliente precisa sobreviver a essa fase para pagar o CAC, investigar a causa (qualidade do lead indicado ou renovação de contrato) é prioridade.</div>
             </div>
           )
         })()}
@@ -360,7 +363,7 @@ export default function Dashboard({ session }) {
       </Section>
 
       {/* Por programa */}
-      <Section id="programa" title="Por programa" sub="Comparação entre embaixador e parceiro. ATENÇÃO: a coluna 'Conv. lead→cliente' NÃO é comparável entre os dois — o 'lead' de embaixador vem do Customer.io (amplo: todo indicado que se cadastrou, muitos de baixa intenção), enquanto o de parceiro tem outra origem/qualificação. Por isso embaixador aparece ~3% e parceiro ~44%: são universos de lead diferentes, não eficiências diferentes. Compare MRR ativo e nº de clientes, não a taxa.">
+      <Section id="programa" title="Por programa" sub="Comparação entre embaixador e parceiro. ATENÇÃO: a coluna 'Conv. lead→cliente' NÃO é comparável entre os dois — o 'lead' de embaixador vem do Customer.io (amplo: todo indicado que se cadastrou, muitos de baixa intenção), enquanto o de parceiro tem outra origem/qualificação. Por isso a taxa de embaixador aparece bem menor que a de parceiro: são universos de lead diferentes, não eficiências diferentes. Compare MRR ativo e nº de clientes, não a taxa.">
         <table>
           <thead><tr><th>Programa</th><th>Referenciadores</th><th>Leads</th><th>New Customers</th><th>Conv. lead→cliente</th><th>Clientes ativos</th><th>MRR ativo</th></tr></thead>
           <tbody>{v.prog.map((p) => (

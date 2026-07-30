@@ -1,7 +1,7 @@
 // Camada de IA: monta o contexto (dados + metodologia) e chama a API do Claude.
 import {
   scopeClients, scopeLeads, computeKpis, byPrograma, eficienciaCohort,
-  leadsByReferrer, saudePrograma, qualidade, mrrSection, tierMix, activeClients,
+  leadsByReferrer, saudePrograma, qualidade, mrrSection, tierMix, activeClients, lifetimeSummary,
 } from './metrics'
 import { methodologyText } from './faq'
 
@@ -21,6 +21,7 @@ export function buildContext(raw) {
   const prog = byPrograma(sc, sl, period)
   const sau = saudePrograma(A, R)
   const qual = qualidade(sce, period)
+  const life = lifetimeSummary(sce, asOf)
   const ef = eficienciaCohort(sce, A, R, leadsByReferrer(sle, period), period, asOf)
   const tiers = tierMix(activeClients(sce, period))
 
@@ -36,7 +37,8 @@ export function buildContext(raw) {
 ## Programa de embaixador (2026)
 Leads: ${kpi.leads} | New Customers (ganhos): ${kpi.ganhos} | Taxa de conversão: ${pctt(kpi.taxaConversao)} | Custo (fixo+comissão): R$${r(kpi.custo)} | Cancelados: ${kpi.cancelados}
 Clientes ativos: ${kpi.clientesAtivos} | MRR ativo: R$${r(mrr.mrrAtivo)} | New MRR: R$${r(kpi.newMrr)} | MRR Lost: R$${r(mrr.mrrLost)} | Net Gain MRR: R$${r(mrr.netGain)} | MRR Growth: ${pctt(mrr.mrrGrowth)} | ARPA: R$${r(kpi.arpa)}
-Churn no período: ${pctt(qual.churnRate)} | Lifetime médio: ${qual.lifetime != null ? qual.lifetime.toFixed(1) + ' meses' : '—'}
+Churn no período (acumulado): ${pctt(qual.churnRate)} | Churn mensal equiv.: ${pctt(qual.churnMonthly)}
+Lifetime (curva de sobrevivência): mediana ${life.median != null ? life.median.toFixed(1) + 'm' : '—'} | ${life.s6 != null ? Math.round(life.s6 * 100) : '?'}% chegam a 6 meses | ${life.s12 != null ? Math.round(life.s12 * 100) : '?'}% a 12 meses | média ${life.mean != null ? life.mean.toFixed(1) + 'm' : '—'} (a média, usada no LTV, é maior que a mediana porque os sobreviventes vivem muito; a distribuição é bimodal com cliff nos meses 4-5)
 Mix de tier (clientes ativos): Tier1 ${tiers[1]}, Tier2 ${tiers[2]}, Tier3 ${tiers[3]}, Tier4 ${tiers[4]}
 
 ## Saúde do programa (embaixador) — 3 blocos que reconciliam
