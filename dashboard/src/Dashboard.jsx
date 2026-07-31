@@ -137,13 +137,14 @@ export default function Dashboard({ session }) {
       ganhos: raw.clients.filter((c) => c._programa === 'embaixador' && inRange(wonDate(c), range)).length,
       hasPd: (raw.pdDaily || []).length > 0,
     }
-    // Mix de tier dos LEADS de cada indicador no período (para expandir a linha na Eficiência).
+    // Mix de tier por indicador (para expandir a linha na Eficiência): leads E new customers por tier.
     const efTierMix = {}
-    for (const l of sl) {
-      if (!inRange(l.lead_date, range)) continue
-      const t = [1, 2, 3, 4].includes(l.tier) ? l.tier : '?'
-      ;(efTierMix[l.referrer_key] ||= { 1: 0, 2: 0, 3: 0, 4: 0, '?': 0 })[t]++
+    const bumpTier = (key, field, tier) => {
+      const m = (efTierMix[key] ||= { leads: { 1: 0, 2: 0, 3: 0, 4: 0, '?': 0 }, newCust: { 1: 0, 2: 0, 3: 0, 4: 0, '?': 0 } })
+      m[field][[1, 2, 3, 4].includes(tier) ? tier : '?']++
     }
+    for (const l of sl) if (inRange(l.lead_date, range)) bumpTier(l.referrer_key, 'leads', l.tier)
+    for (const c of sc) if (inRange(wonDate(c), range)) bumpTier(c.referrer_key, 'newCust', c.tier)
     return {
       funnel, efTierMix,
       kpi: computeKpis(sc, sl, Acost, range), kpiCmp: cmp ? computeKpis(sc, sl, Acost, cmp) : null,
@@ -551,15 +552,19 @@ function EficienciaTable({ rows, tiers }) {
                     <td key={c.key} className={efCellClass(c, r)} title={c.type === 'email' ? (r.name || '') : undefined}>{efCell(c, r)}</td>
                   ))}
                 </tr>
-                {isOpen && (
-                  <tr className="ef-expand">
-                    <td colSpan={EF_COLS.length}>
-                      <div className="ef-tier">
-                        <b>{short(r.name) || r.email}</b> — mix de tier dos {r.leads} leads no período:
-                        {tm && r.leads ? [1, 2, 3, 4, '?'].map((t) => (tm[t] ? <span key={t} className="ef-tier-pill">Tier {t === '?' ? '?' : t}: <b>{tm[t]}</b></span> : null)) : <span className="muted"> nenhum lead no período.</span>}
-                      </div>
-                    </td>
-                  </tr>
+                {isOpen && (tm
+                  ? [1, 2, 3, 4, '?'].filter((t) => (tm.leads[t] || 0) || (tm.newCust[t] || 0)).map((t) => (
+                    <tr className="ef-sub" key={r.key + '-' + t}>
+                      {EF_COLS.map((c) => (
+                        <td key={c.key} className={c.type === 'email' ? 'email ef-tier-label' : ''}>
+                          {c.type === 'email' ? `Tier ${t}` : c.key === 'leads' ? (tm.leads[t] || 0) : c.key === 'newCustomers' ? (tm.newCust[t] || 0) : ''}
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                  : (
+                    <tr className="ef-sub"><td className="email ef-tier-label muted">sem leads no período</td>{EF_COLS.slice(1).map((c) => <td key={c.key} />)}</tr>
+                  )
                 )}
               </Fragment>
             )
