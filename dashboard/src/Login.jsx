@@ -19,7 +19,7 @@ export default function Login() {
     <div className="center">
       <form className="card login" onSubmit={submit}>
         <h1>Entrar</h1>
-        <p className="muted" style={{ marginTop: '-6px' }}>Dashboard de ROI dos programas de indicação</p>
+        <p className="muted" style={{ marginTop: '-6px' }}>Programas Umbler</p>
         <input type="email" placeholder="e-mail" value={email}
                onChange={(e) => setEmail(e.target.value)} autoFocus />
         <input type="password" placeholder="senha" value={pw}
