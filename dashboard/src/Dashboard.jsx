@@ -288,7 +288,7 @@ export default function Dashboard({ session }) {
       </Section>
 
       {/* Eficiência por embaixador (cohort + CAC) */}
-      <Section id="eficiencia" title={f.programa === 'todos' ? 'Eficiência por indicador' : `Eficiência por ${f.programa}`} sub={`Economia por safra: o período seleciona os clientes adquiridos nele e mede CAC, payback e LTV/CAC dessa turma. Priorize o CAC PAYBACK para decisão — depende dos primeiros meses (observados). O LTV/CAC é referência: usa a vida média (Kaplan-Meier com cauda), mas essa média esconde que boa parte dos clientes cancela no cliff dos meses 4-5 (veja o card "Lifetime do cliente" na seção Churn & saúde). O CAC inclui a comissão comprometida dos 3 meses. ${GROSS_MARGIN < 1 ? `Margem bruta de ${Math.round(GROSS_MARGIN * 100)}%.` : 'Sobre a receita cheia.'} Comissão paga a todo indicador; fixo só aos embaixadores "Ativados". Mostra TODOS os indicadores do programa, inclusive quem ainda não gerou cliente. Cada linha é identificada pelo e-mail (passe o mouse para ver o nome).`}>
+      <Section id="eficiencia" title={f.programa === 'todos' ? 'Eficiência por indicador' : `Eficiência por ${f.programa}`} sub={`Quanto cada indicador traz e quanto custa — uma linha por pessoa (pelo e-mail; passe o mouse para ver o nome). No período escolhido: quantos clientes trouxe, quanto custou trazer cada um (CAC) e em quantos meses o cliente devolve esse custo (CAC Payback — o número que mais importa para decidir). Aparecem todos, inclusive quem ainda não trouxe cliente. O que cada coluna significa está no FAQ (botão "?").`}>
         <div className="tablewrap">
           <table>
             <thead><tr>
