@@ -195,6 +195,30 @@ th { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted2); fon
 td:nth-child(n+3), th:nth-child(n+3) { text-align: right; }
 td.email { font-family: var(--font-mono); font-size: 11px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
 .sub-head { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+
+/* Eficiência: busca + ordenação por clique + expandir mix de tier */
+.ef-search { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; max-width: 360px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 12px; }
+.ef-search i { color: var(--muted2); font-size: 15px; }
+.ef-search input { flex: 1; border: none; background: transparent; outline: none; font-family: inherit; font-size: 13px; color: var(--ink); }
+.ef-count { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.ef-table th.sortable { cursor: pointer; position: relative; user-select: none; }
+.ef-table th.sortable:hover { color: var(--ink); }
+.ef-table th.sorted { color: var(--brand); }
+.th-in { display: inline-flex; align-items: center; gap: 3px; }
+.th-in i { font-size: 10px; }
+.th-tip { position: absolute; top: 128%; right: 0; z-index: 45; width: max-content; max-width: 260px;
+  background: var(--ink); color: var(--card); font-family: inherit; font-size: 11.5px; line-height: 1.45; font-weight: 400;
+  letter-spacing: 0; text-transform: none; text-align: left; padding: 8px 11px; border-radius: 8px; box-shadow: var(--shadow);
+  opacity: 0; pointer-events: none; transform: translateY(-4px); transition: opacity .12s, transform .12s; white-space: normal; }
+.ef-table th:first-child .th-tip { right: auto; left: 0; }
+.ef-table th.sortable:hover .th-tip { opacity: 1; transform: translateY(0); }
+.ef-table tbody tr.ef-row { cursor: pointer; }
+.ef-table tbody tr.ef-row:hover td { background: var(--surface-2); }
+.ef-table tbody tr.ef-row.open td { background: color-mix(in srgb, var(--brand) 9%, transparent); border-bottom-color: transparent; }
+.ef-expand td { background: color-mix(in srgb, var(--brand) 9%, transparent); padding: 2px 14px 12px; }
+.ef-tier { font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ef-tier b { color: var(--ink); }
+.ef-tier-pill { background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-family: var(--font-mono); font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); }
 td:nth-child(n+3) { font-variant-numeric: tabular-nums; }
 tbody tr:hover { background: var(--surface-2); }
 

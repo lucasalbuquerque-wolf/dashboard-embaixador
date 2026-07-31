@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, Fragment } from 'react'
 import { supabase } from './supabase'
 import DateRangePicker from './DateRangePicker'
 import Assistant from './Assistant'
@@ -137,8 +137,15 @@ export default function Dashboard({ session }) {
       ganhos: raw.clients.filter((c) => c._programa === 'embaixador' && inRange(wonDate(c), range)).length,
       hasPd: (raw.pdDaily || []).length > 0,
     }
+    // Mix de tier dos LEADS de cada indicador no período (para expandir a linha na Eficiência).
+    const efTierMix = {}
+    for (const l of sl) {
+      if (!inRange(l.lead_date, range)) continue
+      const t = [1, 2, 3, 4].includes(l.tier) ? l.tier : '?'
+      ;(efTierMix[l.referrer_key] ||= { 1: 0, 2: 0, 3: 0, 4: 0, '?': 0 })[t]++
+    }
     return {
-      funnel,
+      funnel, efTierMix,
       kpi: computeKpis(sc, sl, Acost, range), kpiCmp: cmp ? computeKpis(sc, sl, Acost, cmp) : null,
       mrr: mrrSection(sc, range), mrrCmp: cmp ? mrrSection(sc, cmp) : null,
       qual: qualidade(sc, range), sau: saudePrograma(A, R), conc: concentracao(sc, range, R),
@@ -289,24 +296,7 @@ export default function Dashboard({ session }) {
 
       {/* Eficiência por embaixador (cohort + CAC) */}
       <Section id="eficiencia" title={f.programa === 'todos' ? 'Eficiência por indicador' : `Eficiência por ${f.programa}`} sub={`Quanto cada indicador traz e quanto custa — uma linha por pessoa (pelo e-mail; passe o mouse para ver o nome). No período escolhido: quantos clientes trouxe, quanto custou trazer cada um (CAC) e em quantos meses o cliente devolve esse custo (CAC Payback — o número que mais importa para decidir). Aparecem todos, inclusive quem ainda não trouxe cliente. O que cada coluna significa está no FAQ (botão "?").`}>
-        <div className="tablewrap">
-          <table>
-            <thead><tr>
-              <th>E-mail</th><th>Cad.</th><th>% MRR</th><th>Leads</th><th>New cust.</th><th>% conv.</th>
-              <th>CAC</th><th>LTV/CAC</th><th>CAC Payback</th><th>MRR ativo</th><th>Invest. total</th><th>Receita</th><th>{GROSS_MARGIN < 1 ? 'Contribuição' : 'Net'}</th>
-            </tr></thead>
-            <tbody>{v.ef.map((r) => (
-              <tr key={r.key}>
-                <td className="email" title={r.name || ''}>{r.email || r.key}</td><td>{r.registered ? '🟢' : '—'}</td>
-                <td className={r.mrrShare > 0.3 ? 'neg' : ''}>{pct(r.mrrShare)}</td>
-                <td>{r.leads}</td><td>{r.newCustomers}</td><td>{pct(r.taxaConversao)}</td>
-                <td>{r.cac != null ? money(r.cac) : '—'}</td><td><LtvCac x={r.ltvCac} /></td><td><Payback m={r.payback} /></td>
-                <td>{money(r.mrrAtivo)}</td><td>{money(r.investimentoTotal)}</td><td>{money(r.receita)}</td>
-                <td className={r.net >= 0 ? 'pos' : 'neg'}>{money(r.net)}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
+        <EficienciaTable rows={v.ef} tiers={v.efTierMix} />
       </Section>
 
       {/* Break-even do programa */}
@@ -486,6 +476,98 @@ function Sel({ label, value, onChange, opts }) {
 }
 function Section({ id, title, sub, children }) {
   return <section id={id} className="card"><h2>{title}{sub && <span className="info" tabIndex={0} aria-label={sub}><i className="ph ph-question" /><span className="info-tip">{sub}</span></span>}</h2>{children}</section>
+}
+// Colunas da Eficiência: rótulo + explicação (tooltip no cabeçalho) + como renderizar.
+const EF_COLS = [
+  { key: 'email', label: 'E-mail', tip: 'Quem indicou, identificado pelo e-mail. Passe o mouse sobre a linha para ver o nome. Clique na linha para abrir o mix de tier dos leads.', type: 'email' },
+  { key: 'registered', label: 'Cad.', tip: 'Está no funil formal do Pipedrive? 🟢 = sim (embaixador no estágio Ativados). — = indica sem cadastro.', type: 'bool' },
+  { key: 'mrrShare', label: '% MRR', tip: 'Quanto do MRR ativo do programa vem deste indicador. Alto = o programa depende muito dele (risco de concentração).', type: 'pct' },
+  { key: 'leads', label: 'Leads', tip: 'Quantas indicações (leads) esta pessoa trouxe no período. Clique na linha para ver a divisão por tier.', type: 'num' },
+  { key: 'newCustomers', label: 'New cust.', tip: 'Quantos desses leads viraram cliente pagante no período.', type: 'num' },
+  { key: 'taxaConversao', label: '% conv.', tip: 'Dos leads que trouxe, quantos % viraram cliente pagante (New cust. ÷ Leads).', type: 'pct' },
+  { key: 'cac', label: 'CAC', tip: 'Custo de aquisição: quanto custou trazer cada cliente novo = (comissão dos 3 primeiros meses + fixo do período) ÷ nº de clientes novos.', type: 'money' },
+  { key: 'ltvCac', label: 'LTV/CAC', tip: 'Valor do cliente na vida ÷ custo de trazê-lo. ≥3 saudável, 1–3 marginal, <1 destrói valor. É referência, não veredito (a média esconde o cliff dos meses 4-5).', type: 'ltvcac' },
+  { key: 'payback', label: 'CAC Payback', tip: 'Em quantos meses o cliente devolve o que custou trazê-lo. É o número mais confiável para decidir (depende dos primeiros meses, já observados).', type: 'payback' },
+  { key: 'mrrAtivo', label: 'MRR ativo', tip: 'Receita recorrente mensal dos clientes desta pessoa que estão ativos hoje.', type: 'money' },
+  { key: 'investimentoTotal', label: 'Invest. total', tip: 'Total investido nesta pessoa na vida toda: fixo × meses de parceria + toda a comissão paga.', type: 'money' },
+  { key: 'receita', label: 'Receita', tip: 'Receita total que os clientes desta pessoa já geraram (tudo que pagaram até hoje).', type: 'money' },
+  { key: 'net', label: GROSS_MARGIN < 1 ? 'Contribuição' : 'Net', tip: 'Receita gerada − investimento total. Verde = já deu lucro; vermelho = ainda no vermelho.', type: 'net' },
+]
+function efCell(c, r) {
+  switch (c.type) {
+    case 'email': return r.email || r.key
+    case 'bool': return r.registered ? '🟢' : '—'
+    case 'pct': return pct(r[c.key])
+    case 'money': return r[c.key] != null ? money(r[c.key]) : '—'
+    case 'ltvcac': return <LtvCac x={r.ltvCac} />
+    case 'payback': return <Payback m={r.payback} />
+    case 'net': return money(r.net)
+    default: return r[c.key]
+  }
+}
+function efCellClass(c, r) {
+  if (c.type === 'email') return 'email'
+  if (c.key === 'mrrShare') return r.mrrShare > 0.3 ? 'neg' : ''
+  if (c.type === 'net') return r.net >= 0 ? 'pos' : 'neg'
+  return ''
+}
+function EficienciaTable({ rows, tiers }) {
+  const [q, setQ] = useState('')
+  const [sort, setSort] = useState({ col: 'newCustomers', dir: 'desc' })
+  const [open, setOpen] = useState(() => new Set())
+  const ql = q.trim().toLowerCase()
+  const filtered = ql ? rows.filter((r) => (r.email || '').toLowerCase().includes(ql) || (r.name || '').toLowerCase().includes(ql)) : rows
+  const dir = sort.dir === 'desc' ? -1 : 1
+  const list = [...filtered].sort((a, b) => {
+    if (sort.col === 'email') return dir * String(a.email || '').localeCompare(String(b.email || ''))
+    const x = a[sort.col] == null ? -Infinity : a[sort.col], y = b[sort.col] == null ? -Infinity : b[sort.col]
+    return x < y ? -dir : x > y ? dir : 0
+  })
+  const clickSort = (col) => setSort((s) => s.col === col ? { col, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { col, dir: col === 'email' ? 'asc' : 'desc' })
+  const toggle = (k) => setOpen((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
+  return (
+    <>
+      <div className="ef-search">
+        <i className="ph ph-magnifying-glass" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por nome ou e-mail…" />
+        {ql && <span className="ef-count">{list.length} de {rows.length}</span>}
+      </div>
+      <div className="tablewrap">
+        <table className="ef-table">
+          <thead><tr>
+            {EF_COLS.map((c) => (
+              <th key={c.key} className={'sortable' + (sort.col === c.key ? ' sorted' : '')} onClick={() => clickSort(c.key)}>
+                <span className="th-in">{c.label}{sort.col === c.key && <i className={'ph ph-caret-' + (sort.dir === 'desc' ? 'down' : 'up')} />}</span>
+                <span className="th-tip">{c.tip}</span>
+              </th>
+            ))}
+          </tr></thead>
+          <tbody>{list.map((r) => {
+            const tm = tiers[r.key], isOpen = open.has(r.key)
+            return (
+              <Fragment key={r.key}>
+                <tr className={'ef-row' + (isOpen ? ' open' : '')} onClick={() => toggle(r.key)}>
+                  {EF_COLS.map((c) => (
+                    <td key={c.key} className={efCellClass(c, r)} title={c.type === 'email' ? (r.name || '') : undefined}>{efCell(c, r)}</td>
+                  ))}
+                </tr>
+                {isOpen && (
+                  <tr className="ef-expand">
+                    <td colSpan={EF_COLS.length}>
+                      <div className="ef-tier">
+                        <b>{short(r.name) || r.email}</b> — mix de tier dos {r.leads} leads no período:
+                        {tm && r.leads ? [1, 2, 3, 4, '?'].map((t) => (tm[t] ? <span key={t} className="ef-tier-pill">Tier {t === '?' ? '?' : t}: <b>{tm[t]}</b></span> : null)) : <span className="muted"> nenhum lead no período.</span>}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            )
+          })}</tbody>
+        </table>
+      </div>
+    </>
+  )
 }
 function Stat({ l, v, sub, good, bad, delta }) {
   return <div className="stat">{sub && <span className="info" tabIndex={0} aria-label={sub}><i className="ph ph-question" /><span className="info-tip">{sub}</span></span>}<div className={'stat-v ' + (good ? 'pos' : bad ? 'neg' : '')}>{v}</div><div className="stat-l">{l}</div>{delta}</div>
