@@ -175,6 +175,88 @@ export default function Dashboard({ session }) {
   const shownTop = TOP.filter((m) => topSel.has(m.key))
   const indLabel = f.programa === 'parceiro' ? 'parceiros' : f.programa === 'todos' ? 'indicadores' : 'embaixadores'
 
+  // Baixar relatório: CSV com tudo que está na tela, respeitando os filtros e o período atuais.
+  const downloadReport = () => {
+    const esc = (val) => { const s = String(val ?? ''); return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s }
+    const rows = []
+    const P = (...c) => rows.push(c.map(esc).join(';'))
+    const B = () => rows.push('')
+    const progLabel = f.programa === 'todos' ? 'Todos' : f.programa
+    const cadLabel = { todos: 'Todos', cadastrado: 'Cadastrado', naocad: 'Não cadastrado' }[f.registered] || f.registered
+    P('Relatório — Programas Umbler')
+    P('Gerado em', new Date().toLocaleString('pt-BR'))
+    P('Programa', progLabel, 'Cadastro', cadLabel, 'Tier', f.tier === 'todos' ? 'Todos' : f.tier)
+    P('Período', f.range.from, 'até', f.range.to)
+    B()
+    P('VISÃO GERAL'); P('Métrica', 'Valor')
+    P('Leads', v.kpi.leads)
+    P('New Customers (ganhos)', v.kpi.ganhos)
+    P('% Conversão', pct(v.kpi.taxaConversao))
+    P('Custo (fixo + comissão)', money(v.kpi.custo))
+    P('Custo por lead (só fixo)', v.kpi.custoPorLead != null ? money(v.kpi.custoPorLead) : '—')
+    P('Custo por cliente novo', v.kpi.custoPorCliente != null ? money(v.kpi.custoPorCliente) : '—')
+    P('Cancelamentos (no período)', v.kpi.cancelados)
+    P('New MRR', money(v.kpi.newMrr))
+    P('Clientes ativos', v.kpi.clientesAtivos)
+    B()
+    P('MRR'); P('Métrica', 'Valor')
+    P('MRR ativo', money(v.mrr.mrrAtivo))
+    P('ARPA (ticket médio)', money(v.kpi.arpa))
+    P('MRR Lost', money(v.mrr.mrrLost))
+    P('Net Gain MRR', money(v.mrr.netGain))
+    P('MRR Growth', pct(v.mrr.mrrGrowth))
+    P('GRR mensal (equiv.)', pct(v.mrr.grrMonthly))
+    B()
+    P('CHURN & LIFETIME'); P('Métrica', 'Valor')
+    P('Churn no período (acumulado)', pct(v.qual.churnRate))
+    P('Churn mensal (equiv.)', pct(v.qual.churnMonthly))
+    P('Lifetime — mediana (meses)', v.life.median != null ? v.life.median.toFixed(1) : '—')
+    P('Lifetime — % chega a 6 meses', v.life.s6 != null ? pct(v.life.s6) : '—')
+    P('Lifetime — % chega a 12 meses', v.life.s12 != null ? pct(v.life.s12) : '—')
+    P('Lifetime — média (meses)', v.life.mean != null ? v.life.mean.toFixed(1) : '—')
+    if (f.programa !== 'parceiro') {
+      B()
+      P('SAÚDE — EMBAIXADORES'); P('Métrica', 'Valor')
+      P('No funil', v.sau.noFunil)
+      P('Ativos', v.sau.ativos)
+      P('Em processo', v.sau.emProcesso)
+      P('Ativos com fixo', v.sau.comFixo)
+      P('Fixo total (R$/mês)', money(v.sau.fixoTotal))
+      P('Que indicaram (total)', v.sau.totalQueIndicaram)
+      P('Ativos que indicam', v.sau.ativosQueIndicaram)
+      P('Sem cadastro que indicam', v.sau.semCadastroQueIndicaram)
+      P('Geraram cliente pagante', v.sau.queGeraramCliente)
+    }
+    B()
+    P('CONCENTRAÇÃO — TOP ' + indLabel.toUpperCase()); P('#', 'Nome', 'MRR ativo', '% do MRR')
+    v.conc.top.forEach((x, i) => P(i + 1, short(x.name) || x.key, money(x.mrr), pct(x.share)))
+    B()
+    P('EFICIÊNCIA POR INDICADOR')
+    P('E-mail', 'Nome', 'Cadastrado', '% MRR', 'Leads', 'New cust.', '% conv.', 'CAC', 'LTV/CAC', 'CAC Payback (meses)', 'MRR ativo', 'Invest. total', 'Receita', 'Net')
+    v.ef.forEach((r) => P(
+      r.email || r.key, r.name || '', r.registered ? 'sim' : 'não', pct(r.mrrShare),
+      r.leads, r.newCustomers, pct(r.taxaConversao),
+      r.cac != null ? money(r.cac) : '—',
+      r.ltvCac != null ? r.ltvCac.toFixed(2) : '—',
+      r.payback != null ? r.payback.toFixed(1) : '—',
+      money(r.mrrAtivo), money(r.investimentoTotal), money(r.receita), money(r.net),
+    ))
+    B()
+    P('POR PROGRAMA'); P('Programa', 'Referenciadores', 'Leads', 'New Customers', '% conv.', 'Clientes ativos', 'MRR ativo')
+    v.prog.forEach((p) => P(p.programa, p.referenciadores, p.leads, p.ganhos, pct(p.taxaConversao), p.clientesAtivos, money(p.mrrAtivo)))
+    B()
+    P('MIX DE TIER (clientes ativos)'); P('Tier', 'Quantidade')
+    ;[1, 2, 3, 4, '?'].forEach((t) => P('Tier ' + t, v.tierActive[t] || 0))
+
+    const blob = new Blob(['﻿' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `relatorio-${progLabel.toLowerCase()}-${f.range.from}_a_${f.range.to}.csv`
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -190,7 +272,12 @@ export default function Dashboard({ session }) {
 
       <div className="page-head">
         <h1>{(NAV.find(([id]) => id === active) || [, 'Visão geral'])[1]}</h1>
-        <div className="prog">Programa <b style={{ textTransform: 'capitalize' }}>{f.programa === 'todos' ? 'Todos' : f.programa}</b></div>
+        <div className="page-head-r">
+          <div className="prog">Programa <b style={{ textTransform: 'capitalize' }}>{f.programa === 'todos' ? 'Todos' : f.programa}</b></div>
+          <button className="report-btn" onClick={downloadReport} title="Baixar um CSV com os dados da tela, respeitando os filtros e o período">
+            <i className="ph ph-download-simple" /> Baixar relatório
+          </button>
+        </div>
       </div>
 
       <div className="filters">

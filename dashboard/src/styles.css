@@ -99,6 +99,11 @@ select { appearance: none; padding-right: 32px; background-repeat: no-repeat; ba
 .page-head h1 { margin: 0; font-family: var(--font-heading); font-weight: 500; font-size: 30px; letter-spacing: var(--ls-heading); }
 .page-head .prog { font-size: 13px; color: var(--muted); }
 .page-head .prog b { color: var(--ink); font-weight: 600; }
+.page-head-r { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }
+.report-btn { display: inline-flex; align-items: center; gap: 6px; height: auto; padding: 8px 14px; border-radius: var(--radius-sm);
+  background: var(--brand); color: #fff; border: 1px solid var(--brand); font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.report-btn:hover { filter: brightness(1.06); }
+.report-btn i { font-size: 15px; }
 .main .filters { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 85%, transparent);
   backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); margin: 0; padding: 14px 28px; }
 section[id] { scroll-margin-top: 84px; }
