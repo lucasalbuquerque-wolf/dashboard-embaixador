@@ -374,6 +374,15 @@ export function concentracao(clients, range, referrers) {
   }
 }
 
+// Investimento em FIXO (vida toda) de um embaixador Ativado: fixo × meses desde o piso jan/2026
+// (nunca antes da criação). Usado no investimentoTotal das linhas normais E nas de fixo órfão —
+// uma fonte única, para as duas nunca divergirem.
+function fixoInvest(amb, asOf) {
+  if (!amb || !amb.is_ativado || !(amb.fixo_mensal > 0)) return 0
+  const start = amb.data_criacao && amb.data_criacao > FLOOR_DATE ? amb.data_criacao : FLOOR_DATE
+  return amb.fixo_mensal * monthsSince(start, asOf)
+}
+
 // ---- Eficiência por embaixador: COHORT + CAC + CAC Payback --------------
 export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, range, asOf, orphanFixo = false) {
   const ambById = Object.fromEntries(ambassadors.map((a) => [a.pd_deal_id, a]))
@@ -385,6 +394,7 @@ export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, ra
   const byRef = {}
   for (const c of clients) (byRef[c.referrer_key] ||= []).push(c)
   const rows = []
+  const attributedAmb = new Set()   // deals cujo fixo JÁ foi mostrado numa linha de referrer
   for (const r of referrers) {
     // TODOS os indicadores do programa aparecem (decisão do Lucas), inclusive quem ainda não gerou
     // cliente. O caller passa os referrers já escopados por programa (embaixador/parceiro/todos).
@@ -400,10 +410,11 @@ export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, ra
       receitaTot += (c.cmv || 0) * m
       if (activeAsOf(c, asOfDay)) mrrAtivo += c.cmv || 0
     }
-    // Fixo conta a partir do PISO jan/2026 (esquece 2025); nunca antes da criação do embaixador.
+    // Investimento em fixo (vida toda) — helper compartilhado com as linhas de fixo órfão.
+    if (fixoMensal) attributedAmb.add(amb.pd_deal_id)   // este deal já teve o fixo mostrado aqui
+    const investimentoTotal = fixoInvest(amb, asOf) + comissaoTot
+    // Piso do fixo p/ o CAC do período (respeita jan/2026 e a criação do embaixador).
     const fixoStart = amb && amb.data_criacao && amb.data_criacao > FLOOR_DATE ? amb.data_criacao : FLOOR_DATE
-    const fixoMeses = fixoMensal ? monthsSince(fixoStart, asOf) : 0
-    const investimentoTotal = fixoMensal * fixoMeses + comissaoTot
     // Fixo DO PERÍODO: só os meses do range em que o embaixador já existia (a partir de fixoStart,
     // que já respeita o piso jan/2026). Antes usava monthsInRange cheio, inflando o CAC de quem
     // entrou no meio do período — contradizia o investimentoTotal e o custo do topo. (FIX B1)
@@ -436,11 +447,12 @@ export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, ra
   // continua no custo/break-even total. Entram como linha própria (nome do Pipedrive), com o
   // investimento REAL e 0 clientes: é o pior ROI do programa, que estava escondido.
   if (orphanFixo) {
-    const linked = new Set(referrers.filter((r) => r.pd_ambassador_id).map((r) => r.pd_ambassador_id))
+    // Órfão = Ativado com fixo cujo deal NÃO teve o fixo atribuído em nenhuma linha acima
+    // (attributedAmb é exatamente o complemento do que foi mostrado — sem omitir nem duplicar).
     for (const a of ambassadors) {
-      if (!a.is_ativado || !(a.fixo_mensal > 0) || linked.has(a.pd_deal_id)) continue
-      const fixoStart = a.data_criacao && a.data_criacao > FLOOR_DATE ? a.data_criacao : FLOOR_DATE
-      const invest = a.fixo_mensal * monthsSince(fixoStart, asOf)
+      if (!a.is_ativado || !(a.fixo_mensal > 0) || attributedAmb.has(a.pd_deal_id)) continue
+      const invest = fixoInvest(a, asOf)
+      if (invest <= 0) continue   // ainda sem meses de fixo (ex.: entrou agora) — não polui a tabela
       rows.push({
         key: 'amb:' + a.pd_deal_id, email: a.email || a.name || ('deal ' + a.pd_deal_id), name: a.name,
         registered: true, leads: 0, newCustomers: 0, taxaConversao: null,
