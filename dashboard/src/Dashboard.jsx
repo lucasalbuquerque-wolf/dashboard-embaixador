@@ -154,7 +154,7 @@ export default function Dashboard({ session }) {
       life: lifetimeSummary(sc, asOf),
       mrrMov: (() => { const ms = mrrSnapshotMonths(raw.mrrSnap || []); return ms.length >= 2 ? mrrMovements(raw.mrrSnap, ms[ms.length - 2], ms[ms.length - 1]) : null })(),
       snapMonths: mrrSnapshotMonths(raw.mrrSnap || []).length,
-      ef: eficienciaCohort(sc, A, efRefs, leadsByReferrer(sl, range), range, asOf),
+      ef: eficienciaCohort(sc, A, efRefs, leadsByReferrer(sl, range), range, asOf, f.programa !== 'parceiro'),
       prog: byPrograma(allC, allL, range), payback: cumulativeContribution(sc, Acost),
       series, compareOn: !!cmp,
       // Mix de Tier respeita programa/cadastro (mas ignora o filtro de Tier — senão vira 100% de um tier só).
@@ -383,7 +383,7 @@ export default function Dashboard({ session }) {
       </Section>
 
       {/* Eficiência por embaixador (cohort + CAC) */}
-      <Section id="eficiencia" title={f.programa === 'todos' ? 'Eficiência por indicador' : `Eficiência por ${f.programa}`} sub={`Quanto cada indicador traz e quanto custa — uma linha por pessoa (pelo e-mail; passe o mouse para ver o nome). No período escolhido: quantos clientes trouxe, quanto custou trazer cada um (CAC) e em quantos meses o cliente devolve esse custo (CAC Payback — o número que mais importa para decidir). Aparecem todos, inclusive quem ainda não trouxe cliente. O que cada coluna significa está no FAQ (botão "?").`}>
+      <Section id="eficiencia" title={f.programa === 'todos' ? 'Eficiência por indicador' : `Eficiência por ${f.programa}`} sub={`Quanto cada indicador traz e quanto custa — uma linha por pessoa (pelo e-mail; passe o mouse para ver o nome). No período escolhido: quantos clientes trouxe, quanto custou trazer cada um (CAC) e em quantos meses o cliente devolve esse custo (CAC Payback — o número que mais importa para decidir). Aparecem todos, inclusive quem ainda não trouxe cliente. Linhas marcadas "só fixo" são embaixadores que PAGAM fixo mas cujo contrato não está ligado às indicações no Customer.io (ou nunca indicaram) — mostramos o investimento real do fixo, com clientes em 0. O que cada coluna significa está no FAQ (botão "?").`}>
         <EficienciaTable rows={v.ef} tiers={v.efTierMix} />
       </Section>
 
@@ -583,7 +583,9 @@ const EF_COLS = [
 ]
 function efCell(c, r) {
   switch (c.type) {
-    case 'email': return r.email || r.key
+    case 'email': return r.orphan
+      ? <>{r.email || r.key} <span className="ef-orphan" title="Embaixador que PAGA fixo, mas cujo contrato do Pipedrive não está ligado às indicações no Customer.io (e-mail/nome diferentes, ou ainda não indicou). Mostramos o investimento real do fixo; leads e clientes aparecem em 0.">só fixo</span></>
+      : (r.email || r.key)
     case 'bool': return r.registered ? '🟢' : '—'
     case 'pct': return pct(r[c.key])
     case 'money': return r[c.key] != null ? money(r[c.key]) : '—'

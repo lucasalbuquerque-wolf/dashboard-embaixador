@@ -375,7 +375,7 @@ export function concentracao(clients, range, referrers) {
 }
 
 // ---- Eficiência por embaixador: COHORT + CAC + CAC Payback --------------
-export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, range, asOf) {
+export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, range, asOf, orphanFixo = false) {
   const ambById = Object.fromEntries(ambassadors.map((a) => [a.pd_deal_id, a]))
   const asOfDay = asOf.toISOString().slice(0, 10)
   const monthsInRange = Math.max(1, monthsBetweenYm(range.from.slice(0, 7), range.to.slice(0, 7)) + 1)
@@ -429,6 +429,25 @@ export function eficienciaCohort(clients, ambassadors, referrers, leadsByRef, ra
       taxaConversao: nLeads ? newCustomers / nLeads : null, cac, ltvCac, payback, mrrAtivo,
       investimentoTotal, receita: receitaTot, net: receitaTot * GROSS_MARGIN - investimentoTotal,
     })
+  }
+  // Fixo ÓRFÃO: embaixadores Ativados que PAGAM fixo mas cujo deal do Pipedrive não casou com
+  // nenhum referenciador do Customer.io (e-mail/nome diferentes, ou nunca indicaram). Sem isto o
+  // fixo deles some da atribuição por indicador (ex.: Peter/EiNerd, R$18k, aparecia zerado) — mas
+  // continua no custo/break-even total. Entram como linha própria (nome do Pipedrive), com o
+  // investimento REAL e 0 clientes: é o pior ROI do programa, que estava escondido.
+  if (orphanFixo) {
+    const linked = new Set(referrers.filter((r) => r.pd_ambassador_id).map((r) => r.pd_ambassador_id))
+    for (const a of ambassadors) {
+      if (!a.is_ativado || !(a.fixo_mensal > 0) || linked.has(a.pd_deal_id)) continue
+      const fixoStart = a.data_criacao && a.data_criacao > FLOOR_DATE ? a.data_criacao : FLOOR_DATE
+      const invest = a.fixo_mensal * monthsSince(fixoStart, asOf)
+      rows.push({
+        key: 'amb:' + a.pd_deal_id, email: a.email || a.name || ('deal ' + a.pd_deal_id), name: a.name,
+        registered: true, leads: 0, newCustomers: 0, taxaConversao: null,
+        cac: null, ltvCac: null, payback: null, mrrAtivo: 0,
+        investimentoTotal: invest, receita: 0, net: -invest, orphan: true,
+      })
+    }
   }
   const totMrr = rows.reduce((s, r) => s + r.mrrAtivo, 0)
   rows.forEach((r) => { r.mrrShare = totMrr ? r.mrrAtivo / totMrr : 0 })  // % do MRR do programa
