@@ -22,7 +22,7 @@ export function buildContext(raw) {
   const sau = saudePrograma(A, R)
   const qual = qualidade(sce, period)
   const life = lifetimeSummary(sce, asOf)
-  const ef = eficienciaCohort(sce, A, R, leadsByReferrer(sle, period), period, asOf)
+  const ef = eficienciaCohort(sce, A, R, leadsByReferrer(sle, period), period, asOf, true) // inclui fixo órfão (ex.: Peter)
   const tiers = tierMix(activeClients(sce, period))
 
   const progLines = prog.map((p) => `- ${p.programa}: ${p.referenciadores} referenciadores, ${p.leads} leads, ${p.ganhos} ganhos, conversão ${pctt(p.taxaConversao)}, ${p.clientesAtivos} clientes ativos, MRR R$${r(p.mrrAtivo)}`).join('\n')
